@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pymongo
+python-multipart
+sentence-transformers
+scikit-learn
+pdfminer.six
+python-docx
+torch
+
+python train_role_model.py
+
+python -m uvicorn main:app --reload
