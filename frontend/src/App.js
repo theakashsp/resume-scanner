@@ -116,10 +116,14 @@ function App() {
         </div>
       )}
 
-      {/* Ranking Section */}
+     {/* ================= Ranking Section ================= */}
       <div className="card">
         <h2>🏆 Candidate Ranking</h2>
-        <button className="secondary-btn" onClick={fetchRanking} style={{ marginBottom: '15px' }}>🔄 Refresh Ranking</button>
+        
+        {/* Make sure the className is here! */}
+        <button className="secondary-btn" onClick={fetchRanking} style={{ marginBottom: '20px' }}>
+          🔄 Refresh Ranking
+        </button>
         
         {rankedCandidates.length > 0 ? (
           <table className="ranking-table">
@@ -135,28 +139,77 @@ function App() {
                 <tr key={i}>
                   <td>{c.filename}</td>
                   <td style={{ color: '#2563eb', fontWeight: 'bold' }}>{c.match_percentage}%</td>
-                  <td>{c.status}</td>
+                  <td>
+                    <span className={`status-badge ${c.status === 'Highly Recommended' ? 'green' : 'yellow'}`}>
+                      {c.status}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        ) : <p style={{color:'#94a3b8', fontStyle:'italic'}}>No rankings yet.</p>}
+        ) : (
+          <p style={{color:'#94a3b8', fontStyle:'italic'}}>No rankings available yet. Upload resumes first.</p>
+        )}
       </div>
 
-      {/* Analytics Section */}
+      {/* ================= Analytics Section ================= */}
       <div className="card">
         <h2>📈 Analytics Dashboard</h2>
-        <button className="secondary-btn" onClick={fetchAnalytics} style={{ marginBottom: '15px' }}>📊 Load Charts</button>
-        {analytics && (
-           <div style={{ height: '300px' }}>
-             <Bar
-               data={{
-                 labels: analytics.top_skills?.map(s => s[0]) || [],
-                 datasets: [{ label: 'Skill Frequency', data: analytics.top_skills?.map(s => s[1]) || [], backgroundColor: '#3b82f6' }]
-               }}
-               options={{ maintainAspectRatio: false }}
-             />
-           </div>
+        
+        <button className="secondary-btn" onClick={fetchAnalytics} style={{ marginBottom: '20px' }}>
+          📊 Load Statistics
+        </button>
+
+        {analytics ? (
+          <div>
+            {/* The Beautiful Stat Cards */}
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-value">{analytics.total_resumes || 0}</div>
+                <div className="stat-label">Total Resumes</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">
+                  {analytics.average_match ? Number(analytics.average_match).toFixed(1) : 0}%
+                </div>
+                <div className="stat-label">Average Match</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">
+                  {analytics.top_skills ? analytics.top_skills.length : 0}
+                </div>
+                <div className="stat-label">Unique Skills Found</div>
+              </div>
+            </div>
+
+            {/* The Chart */}
+            {analytics.top_skills && analytics.top_skills.length > 0 ? (
+              <div style={{ height: '350px', marginTop: '30px' }}>
+                <Bar
+                  data={{
+                    labels: analytics.top_skills.map(s => Array.isArray(s) ? s[0] : (s._id || s.skill || "Unknown")),
+                    datasets: [{ 
+                      label: 'Skill Frequency', 
+                      data: analytics.top_skills.map(s => Array.isArray(s) ? s[1] : (s.count || 0)), 
+                      backgroundColor: 'rgba(59, 130, 246, 0.8)',
+                      borderRadius: 4
+                    }]
+                  }}
+                  options={{ 
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } }
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ padding: '40px', textAlign: 'center', background: '#f8fafc', borderRadius: '10px', marginTop: '20px' }}>
+                <p style={{ color: '#64748b' }}>Not enough skill data to generate a chart yet.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p style={{color:'#94a3b8'}}>Click "Load Statistics" to view dashboard.</p>
         )}
       </div>
     </div>
