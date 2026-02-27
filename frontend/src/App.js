@@ -1,217 +1,179 @@
 import React, { useState } from "react";
 import axios from "axios";
-import "./App.css"; // IMPORTANT: Ensure this matches your file name
+import "./App.css"; 
 import Login from "./Login";
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from "chart.js";
-import { Bar } from "react-chartjs-2";
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const API_BASE = process.env.REACT_APP_API_URL || "http://127.0.0.1:8000";
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [files, setFiles] = useState([]);
-  const [jobDescription, setJobDescription] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null); 
   const [batchResults, setBatchResults] = useState([]);
-  const [rankedCandidates, setRankedCandidates] = useState([]);
-  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [statusMsg, setStatusMsg] = useState(""); 
 
   const handleLogin = (status) => setIsLoggedIn(status);
-  const handleLogout = () => setIsLoggedIn(false);
+  
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setSelectedFile(null);
+    setBatchResults([]);
+  };
+
+  const handleFileChange = (e) => {
+    if (e.target.files.length > 0) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
 
   const handleUpload = async () => {
-    if (!files || files.length === 0) { alert("Please select resume files"); return; }
+    if (!selectedFile) { 
+      alert("Please select a resume file first."); 
+      return; 
+    }
+    
     const formData = new FormData();
-    Array.from(files).forEach((file) => formData.append("files", file));
+    formData.append("files", selectedFile);
 
     try {
-      setLoading(true); setError(""); setBatchResults([]);
-      const response = await axios.post(`${API_BASE}/upload_resume/?job_description=${encodeURIComponent(jobDescription)}`, formData, { headers: { "Content-Type": "multipart/form-data" } });
+      setLoading(true); 
+      setError(""); 
+      setStatusMsg("INITIALIZING AI SCAN..."); 
+      setBatchResults([]);
+      
+      // High-intensity status sequence
+      setTimeout(() => setStatusMsg("EXTRACTING DEEP SKILLS..."), 1000);
+      setTimeout(() => setStatusMsg("MATCHING LIVE JOBS IN INDIA..."), 2000);
+
+      const response = await axios.post(`${API_BASE}/upload_resume/`, formData, { 
+        headers: { "Content-Type": "multipart/form-data" } 
+      });
+      
       setBatchResults(response.data.batch_results || []);
-    } catch (err) { console.error(err); setError("Upload failed. Please check backend."); } finally { setLoading(false); }
-  };
-
-  const downloadReport = async (candidate) => {
-    try {
-      const response = await axios.post(`${API_BASE}/generate_report/`, candidate, { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: "application/pdf" }));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `${candidate.filename || "Resume"}_Report.pdf`);
-      document.body.appendChild(link); link.click(); link.remove();
-    } catch (error) { alert("PDF download failed"); }
-  };
-
-  const fetchRanking = async () => {
-    try { const response = await axios.get(`${API_BASE}/rank_candidates`); setRankedCandidates(response.data || []); } catch (err) { console.error(err); }
-  };
-
-  const fetchAnalytics = async () => {
-    try { const response = await axios.get(`${API_BASE}/analytics`); setAnalytics(response.data || null); } catch (err) { console.error(err); }
+    } catch (err) { 
+      console.error(err); 
+      setError("Analysis failed. Please check backend connection."); 
+    } finally { 
+      setLoading(false); 
+      setStatusMsg("");
+    }
   };
 
   if (!isLoggedIn) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="App">
+      {/* --- DASHBOARD HEADER --- */}
       <div className="header-row">
-        <h1 className="main-title">🚀 AI Recruiter Pro</h1>
+        <div className="brand-container left">
+          <svg className="brand-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <circle cx="12" cy="12" r="6"></circle>
+            <circle cx="12" cy="12" r="2"></circle>
+          </svg>
+          <h1 className="brand-title">CareerMatch AI</h1>
+        </div>
         <button className="logout-btn" onClick={handleLogout}>Logout</button>
       </div>
 
-      {/* Upload Section */}
+      {/* --- UPLOAD SECTION --- */}
       <div className="card">
-        <h2>📂 Upload Candidates</h2>
-        <div className="upload-box">
-          <input type="file" multiple onChange={(e) => setFiles(e.target.files)} />
-          <p style={{ color: '#2563eb', fontWeight: '600' }}>
-            {files.length > 0 ? `✅ ${files.length} Files Selected` : "📄 Drag & Drop Resumes Here"}
-          </p>
+        <h2>📁 Upload Your Resume</h2>
+        <p style={{ color: '#64748b', marginBottom: '30px', fontWeight: '600', fontSize: '14px' }}>
+          Let our AI analyze your skills and find the best live jobs for you in the market.
+        </p>
+
+        <div className="upload-container">
+          <div className="upload-dropzone">
+            <div className="upload-icon">📂</div>
+            <p style={{ fontWeight: '800', color: '#1e293b', fontSize: '15px' }}>
+              {selectedFile ? "FILE READY" : "CLICK TO BROWSE OR DRAG & DROP"}
+            </p>
+            {selectedFile && (
+              <p className="file-info-text">✅ {selectedFile.name}</p>
+            )}
+            <input type="file" onChange={handleFileChange} accept=".pdf,.docx" />
+          </div>
+
+          <div className="action-box">
+            <button 
+              className="primary-btn" 
+              onClick={handleUpload}
+              disabled={!selectedFile || loading}
+            >
+              {loading ? "⚙️ ANALYZING..." : "🚀 Analyze & Find Jobs"}
+            </button>
+          </div>
         </div>
-        <textarea placeholder="Paste Job Description (JD) here..." value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} rows={4} />
-        <button className="primary-btn" onClick={handleUpload} disabled={loading}>
-          {loading ? "⏳ Analyzing..." : "🚀 Upload & Analyze"}
-        </button>
-        {error && <p style={{ color: 'red', marginTop: '10px' }}>{error}</p>}
+        {error && <p style={{ color: '#ef4444', marginTop: '15px', fontWeight: '800' }}>{error}</p>}
       </div>
 
-      {/* Results Section */}
-      {batchResults.length > 0 && (
+      {/* --- LOADING SPINNER --- */}
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '60px 0' }}>
+          <div className="spinner"></div>
+          <p style={{ color: '#ffffff', fontWeight: '800', marginTop: '20px', letterSpacing: '0.15em' }}>
+            {statusMsg}
+          </p>
+        </div>
+      )}
+
+      {/* --- RESULTS SECTION --- */}
+      {batchResults.length > 0 && !loading && (
         <div className="card">
-          <h2>📊 Candidate Analysis</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+            <h2>🎯 Your Career Dashboard</h2>
+            <span style={{ background: '#22c55e', color: 'white', padding: '5px 15px', borderRadius: '50px', fontSize: '11px', fontWeight: '900' }}>LIVE SESSION ACTIVE</span>
+          </div>
+          
           {batchResults.map((res, index) => (
-            <div key={index} style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '20px', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0 }}>{res.filename}</h3>
-                <span style={{ 
-                  background: res.status === 'Highly Recommended' ? '#dcfce7' : '#fef9c3', 
-                  color: res.status === 'Highly Recommended' ? '#166534' : '#854d0e',
-                  padding: '5px 10px', borderRadius: '15px', fontSize: '12px', fontWeight: 'bold'
-                }}>
-                  {res.status}
-                </span>
-              </div>
-              <p style={{ marginTop: '5px', color: '#64748b' }}>Match Score: <strong>{res.match_percentage}%</strong></p>
-
-              {/* Matched Skills - Styled as Pills */}
-              <p style={{fontSize:'13px', fontWeight:'600', marginTop:'10px'}}>Matched Skills:</p>
-              <div className="skills-container">
-                {res.matched_skills?.map((s, i) => <span key={i} className="skill-tag matched">{s}</span>)}
+            <div key={index}>
+              
+              <div style={{ background: '#eff6ff', padding: '35px', borderRadius: '24px', border: '1px solid #bfdbfe', marginBottom: '45px' }}>
+                <h3 style={{ color: '#1e40af', marginBottom: '10px', fontSize: '28px', fontWeight: '800' }}>
+                  Predicted Role: {res.predicted_role}
+                </h3>
+                
+                <p style={{fontSize:'12px', fontWeight:'800', color: '#64748b', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
+                  Extracted Professional Skills:
+                </p>
+                <div className="skills-container" style={{ marginTop: '15px' }}>
+                  {res.extracted_skills?.map((s, i) => (
+                    <span key={i} className="skill-tag matched">{s}</span>
+                  ))}
+                </div>
               </div>
 
-              {/* Missing Skills - Styled as Pills */}
-              <p style={{fontSize:'13px', fontWeight:'600', marginTop:'10px'}}>Missing Skills:</p>
-              <div className="skills-container">
-                {res.missing_skills?.map((s, i) => <span key={i} className="skill-tag missing">{s}</span>)}
+              <div style={{ borderTop: '2px solid #f1f5f9', paddingTop: '45px' }}>
+                <h3 style={{ color: '#0f172a', fontWeight: '800', fontSize: '22px', marginBottom: '10px' }}>💼 Recommended Roles in India</h3>
+                <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '35px', fontWeight: '500' }}>
+                  Top market opportunities identified across India based on your profile.
+                </p>
+                
+                <div className="job-grid">
+                  {res.recommended_jobs && res.recommended_jobs.length > 0 ? (
+                    res.recommended_jobs.map((job, j) => (
+                      <div key={j} className="job-card">
+                        <div>
+                          <div className="job-title" style={{ fontSize: '15px', marginBottom: '12px' }}>{job.title}</div>
+                          <div className="job-company" style={{ fontWeight: '700' }}>🏢 {job.company}</div>
+                          <div className="job-location" style={{ fontSize: '12px' }}>🇮🇳 {job.location}</div>
+                        </div>
+                        <a href={job.link} target="_blank" rel="noopener noreferrer" className="apply-btn">
+                          Apply Now
+                        </a>
+                      </div>
+                    ))
+                  ) : (
+                    <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>No live Indian jobs found. Please try again later.</p>
+                  )}
+                </div>
               </div>
-
-              <button className="secondary-btn" style={{ marginTop: '15px' }} onClick={() => downloadReport(res)}>
-                📥 Download Report
-              </button>
             </div>
           ))}
         </div>
       )}
-
-     {/* ================= Ranking Section ================= */}
-      <div className="card">
-        <h2>🏆 Candidate Ranking</h2>
-        
-        {/* Make sure the className is here! */}
-        <button className="secondary-btn" onClick={fetchRanking} style={{ marginBottom: '20px' }}>
-          🔄 Refresh Ranking
-        </button>
-        
-        {rankedCandidates.length > 0 ? (
-          <table className="ranking-table">
-            <thead>
-              <tr>
-                <th>Candidate Name</th>
-                <th>Match Score</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rankedCandidates.map((c, i) => (
-                <tr key={i}>
-                  <td>{c.filename}</td>
-                  <td style={{ color: '#2563eb', fontWeight: 'bold' }}>{c.match_percentage}%</td>
-                  <td>
-                    <span className={`status-badge ${c.status === 'Highly Recommended' ? 'green' : 'yellow'}`}>
-                      {c.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p style={{color:'#94a3b8', fontStyle:'italic'}}>No rankings available yet. Upload resumes first.</p>
-        )}
-      </div>
-
-      {/* ================= Analytics Section ================= */}
-      <div className="card">
-        <h2>📈 Analytics Dashboard</h2>
-        
-        <button className="secondary-btn" onClick={fetchAnalytics} style={{ marginBottom: '20px' }}>
-          📊 Load Statistics
-        </button>
-
-        {analytics ? (
-          <div>
-            {/* The Beautiful Stat Cards */}
-            <div className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-value">{analytics.total_resumes || 0}</div>
-                <div className="stat-label">Total Resumes</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-value">
-                  {analytics.average_match ? Number(analytics.average_match).toFixed(1) : 0}%
-                </div>
-                <div className="stat-label">Average Match</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-value">
-                  {analytics.top_skills ? analytics.top_skills.length : 0}
-                </div>
-                <div className="stat-label">Unique Skills Found</div>
-              </div>
-            </div>
-
-            {/* The Chart */}
-            {analytics.top_skills && analytics.top_skills.length > 0 ? (
-              <div style={{ height: '350px', marginTop: '30px' }}>
-                <Bar
-                  data={{
-                    labels: analytics.top_skills.map(s => Array.isArray(s) ? s[0] : (s._id || s.skill || "Unknown")),
-                    datasets: [{ 
-                      label: 'Skill Frequency', 
-                      data: analytics.top_skills.map(s => Array.isArray(s) ? s[1] : (s.count || 0)), 
-                      backgroundColor: 'rgba(59, 130, 246, 0.8)',
-                      borderRadius: 4
-                    }]
-                  }}
-                  options={{ 
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } }
-                  }}
-                />
-              </div>
-            ) : (
-              <div style={{ padding: '40px', textAlign: 'center', background: '#f8fafc', borderRadius: '10px', marginTop: '20px' }}>
-                <p style={{ color: '#64748b' }}>Not enough skill data to generate a chart yet.</p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <p style={{color:'#94a3b8'}}>Click "Load Statistics" to view dashboard.</p>
-        )}
-      </div>
     </div>
   );
 }
