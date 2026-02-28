@@ -1,13 +1,8 @@
 fastapi
 uvicorn
-pymongo
 python-multipart
-sentence-transformers
-scikit-learn
-pdfminer.six
-python-docx
-torch
-
-python train_role_model.py
-
-python -m uvicorn main:app --reload
+requests
+pymongo
+fpdf
+# Add whatever library you used in your parser.py (e.g., PyPDF2 or pdfplumber)
+PyPDF2

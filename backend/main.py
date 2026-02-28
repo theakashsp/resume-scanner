@@ -61,6 +61,35 @@ def predict_best_role(extracted_skills):
         return "Software Developer"
     else:
         return "Software Engineer" 
+# ======================================================
+# 📊 ATS SCORING & SKILL GAP ENGINE
+# ======================================================
+ROLE_SKILLS_MAP = {
+    "Machine Learning Engineer": ["python", "tensorflow", "pytorch", "sql", "docker", "aws", "pandas"],
+    "Full Stack Developer": ["react", "node.js", "javascript", "mongodb", "docker", "aws", "typescript", "html", "css"],
+    "Data Analyst": ["sql", "excel", "python", "tableau", "powerbi", "statistics"],
+    "DevOps Engineer": ["aws", "docker", "kubernetes", "linux", "ci/cd", "terraform", "python"],
+    "Software Developer": ["java", "c++", "python", "data structures", "algorithms", "sql", "git"],
+    "Software Engineer": ["python", "java", "sql", "git", "agile", "aws", "docker"]
+}
+
+def analyze_skill_gap(predicted_role, extracted_skills):
+    """Calculates the ATS Score and identifies missing industry skills."""
+    ideal_skills = ROLE_SKILLS_MAP.get(predicted_role, [])
+    extracted_lower = [str(s).lower() for s in extracted_skills]
+    
+    # Find what the user is missing
+    missing_skills = [skill.title() for skill in ideal_skills if skill not in extracted_lower]
+    
+    # Calculate ATS Match Score (Base 40% + Skill Match Percentage)
+    if not ideal_skills:
+        ats_score = 75 # Default score if role is unknown
+    else:
+        matched_count = len(ideal_skills) - len(missing_skills)
+        match_ratio = matched_count / len(ideal_skills)
+        ats_score = int(40 + (match_ratio * 60)) # Formula for realistic scoring
+        
+    return missing_skills, ats_score
 
 def fetch_live_jobs(role, location="Bengaluru, India"):
     try:
@@ -165,21 +194,32 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             if not extracted_skills:
                 extracted_skills = ["Python", "Problem Solving"] 
 
+       # 2. Predict Role
             predicted_role = predict_best_role(extracted_skills)
+
+            # 🚀 NEW: Calculate ATS Score & Skill Gap
+            missing_skills, ats_score = analyze_skill_gap(predicted_role, extracted_skills)
+
+            # 3. Fetch Live Jobs
             recommended_jobs = fetch_live_jobs(predicted_role)
 
+            # 4. Save to Database
             candidate_data = {
                 "filename": file.filename,
                 "skills": extracted_skills,
                 "predicted_role": predicted_role,
+                "ats_score": ats_score, # Save to DB
                 "uploaded_at": datetime.utcnow().isoformat()
             }
             save_candidate(candidate_data)
 
+            # 5. Build Final Response
             results.append({
                 "filename": file.filename,
                 "extracted_skills": extracted_skills,
                 "predicted_role": predicted_role,
+                "missing_skills": missing_skills, # Send to Frontend
+                "ats_score": ats_score,           # Send to Frontend
                 "recommended_jobs": recommended_jobs
             })
 

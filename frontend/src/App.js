@@ -42,9 +42,9 @@ function App() {
       setStatusMsg("INITIALIZING AI SCAN..."); 
       setBatchResults([]);
       
-      // High-intensity status sequence
       setTimeout(() => setStatusMsg("EXTRACTING DEEP SKILLS..."), 1000);
-      setTimeout(() => setStatusMsg("MATCHING LIVE JOBS IN INDIA..."), 2000);
+      setTimeout(() => setStatusMsg("CALCULATING ATS SCORE..."), 2000);
+      setTimeout(() => setStatusMsg("MATCHING LIVE JOBS IN INDIA..."), 3000);
 
       const response = await axios.post(`${API_BASE}/upload_resume/`, formData, { 
         headers: { "Content-Type": "multipart/form-data" } 
@@ -60,11 +60,35 @@ function App() {
     }
   };
 
+  const handleDownloadPDF = async (res) => {
+    try {
+      const response = await axios.post(`${API_BASE}/generate_report/`, {
+        filename: res.filename,
+        predicted_role: res.predicted_role,
+        extracted_skills: res.extracted_skills,
+        missing_skills: res.missing_skills,
+        ats_score: res.ats_score
+      }, {
+        responseType: 'blob'
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${res.filename.split('.')[0]}_ATS_Report.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate PDF report.");
+    }
+  };
+
   if (!isLoggedIn) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="App">
-      {/* --- DASHBOARD HEADER --- */}
       <div className="header-row">
         <div className="brand-container left">
           <svg className="brand-icon" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -77,11 +101,10 @@ function App() {
         <button className="logout-btn" onClick={handleLogout}>Logout</button>
       </div>
 
-      {/* --- UPLOAD SECTION --- */}
       <div className="card">
         <h2>📁 Upload Your Resume</h2>
         <p style={{ color: '#64748b', marginBottom: '30px', fontWeight: '600', fontSize: '14px' }}>
-          Let our AI analyze your skills and find the best live jobs for you in the market.
+          Let our AI analyze your skills, calculate your ATS score, and find the best live jobs.
         </p>
 
         <div className="upload-container">
@@ -109,7 +132,6 @@ function App() {
         {error && <p style={{ color: '#ef4444', marginTop: '15px', fontWeight: '800' }}>{error}</p>}
       </div>
 
-      {/* --- LOADING SPINNER --- */}
       {loading && (
         <div style={{ textAlign: 'center', padding: '60px 0' }}>
           <div className="spinner"></div>
@@ -119,7 +141,6 @@ function App() {
         </div>
       )}
 
-      {/* --- RESULTS SECTION --- */}
       {batchResults.length > 0 && !loading && (
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
@@ -130,19 +151,51 @@ function App() {
           {batchResults.map((res, index) => (
             <div key={index}>
               
-              <div style={{ background: '#eff6ff', padding: '35px', borderRadius: '24px', border: '1px solid #bfdbfe', marginBottom: '45px' }}>
-                <h3 style={{ color: '#1e40af', marginBottom: '10px', fontSize: '28px', fontWeight: '800' }}>
+              <div style={{ background: '#eff6ff', padding: '35px', borderRadius: '24px', border: '1px solid #bfdbfe', marginBottom: '45px', position: 'relative' }}>
+                
+                <button 
+                  onClick={() => handleDownloadPDF(res)}
+                  className="secondary-btn"
+                  style={{ position: 'absolute', top: '35px', right: '35px' }}
+                >
+                  📥 Download PDF
+                </button>
+
+                <h3 style={{ color: '#1e40af', marginBottom: '25px', fontSize: '28px', fontWeight: '800' }}>
                   Predicted Role: {res.predicted_role}
                 </h3>
                 
+                <div className="ats-container">
+                  <div className="ats-header">
+                    <span className="ats-title">ATS Match Score</span>
+                    <span className="ats-score-text">{res.ats_score ? res.ats_score : '75'}%</span>
+                  </div>
+                  <div className="progress-bar-bg">
+                    <div className="progress-bar-fill" style={{ width: `${res.ats_score ? res.ats_score : 75}%` }}></div>
+                  </div>
+                </div>
+
                 <p style={{fontSize:'12px', fontWeight:'800', color: '#64748b', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
-                  Extracted Professional Skills:
+                  ✅ Verified Professional Skills:
                 </p>
                 <div className="skills-container" style={{ marginTop: '15px' }}>
                   {res.extracted_skills?.map((s, i) => (
                     <span key={i} className="skill-tag matched">{s}</span>
                   ))}
                 </div>
+
+                {res.missing_skills && res.missing_skills.length > 0 && (
+                  <>
+                    <p style={{fontSize:'12px', fontWeight:'800', color: '#e11d48', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
+                      ⚠️ Skill Gap (Learn these to get hired):
+                    </p>
+                    <div className="skills-container" style={{ marginTop: '15px' }}>
+                      {res.missing_skills.map((s, i) => (
+                        <span key={i} className="skill-tag missing">{s}</span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
 
               <div style={{ borderTop: '2px solid #f1f5f9', paddingTop: '45px' }}>
