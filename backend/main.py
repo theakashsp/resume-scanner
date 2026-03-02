@@ -17,6 +17,9 @@ from report_generator import generate_pdf_report
 
 app = FastAPI(title="AI Resume Scanner & Job Recommender", version="5.0 - Cloud Edition")
 
+# ======================================================
+# CORS CONFIGURATION
+# ======================================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,38 +40,54 @@ def validate_file(filename: str):
             detail="Only PDF and DOCX files are supported."
         )
 
+# ======================================================
+# 🧠 AI ROLE PREDICTION ENGINE (DYNAMIC DICTIONARY)
+# ======================================================
 def predict_best_role(extracted_skills):
     if not extracted_skills:
         return "Software Engineer"
         
     skills = set([str(skill).lower() for skill in extracted_skills])
     
-    ml_skills = {'python', 'machine learning', 'tensorflow', 'pytorch', 'data science', 'pandas', 'opencv', 'yolo'}
-    web_skills = {'react', 'javascript', 'node.js', 'html', 'css', 'fastapi', 'django'}
-    data_skills = {'sql', 'excel', 'tableau', 'powerbi', 'data analysis'}
-    cloud_skills = {'aws', 'docker', 'kubernetes', 'azure', 'linux'}
-    core_dev_skills = {'c', 'java', 'c++', 'data structures', 'algorithms'}
+    # Define skill sets for expanded roles
+    role_definitions = {
+        "Machine Learning Engineer": {'python', 'machine learning', 'tensorflow', 'pytorch', 'data science', 'pandas', 'opencv', 'yolo'},
+        "Full Stack Developer": {'react', 'javascript', 'node.js', 'html', 'css', 'fastapi', 'django'},
+        "Backend Developer": {'python', 'java', 'node.js', 'sql', 'mongodb', 'django', 'fastapi', 'spring boot', 'api', 'postgresql'},
+        "Frontend Developer": {'react', 'angular', 'vue', 'html', 'css', 'javascript', 'typescript', 'tailwind'},
+        "Data Analyst": {'sql', 'excel', 'tableau', 'powerbi', 'data analysis', 'statistics'},
+        "DevOps Engineer": {'aws', 'docker', 'kubernetes', 'linux', 'ci/cd', 'terraform', 'jenkins'},
+        "Cloud Engineer": {'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'linux', 'terraform'},
+        "Security Engineer": {'cybersecurity', 'penetration testing', 'ethical hacking', 'network security', 'linux', 'cryptography'},
+        "Software Developer": {'c', 'java', 'c++', 'data structures', 'algorithms'}
+    }
 
-    if len(skills.intersection(ml_skills)) >= 2:
-        return "Machine Learning Engineer"
-    elif len(skills.intersection(web_skills)) >= 2:
-        return "Full Stack Developer"
-    elif len(skills.intersection(data_skills)) >= 2:
-        return "Data Analyst"
-    elif len(skills.intersection(cloud_skills)) >= 2:
-        return "DevOps Engineer"
-    elif len(skills.intersection(core_dev_skills)) >= 2:
-        return "Software Developer"
-    else:
-        return "Software Engineer" 
+    # Calculate match score for each role
+    scores = {}
+    for role, required_skills in role_definitions.items():
+        scores[role] = len(skills.intersection(required_skills))
+        
+    # Find the role with the highest score
+    best_role = max(scores, key=scores.get)
+
+    # If no match found (score is 0), default to Software Engineer
+    if scores[best_role] == 0:
+        return "Software Engineer"
+        
+    return best_role
+
 # ======================================================
 # 📊 ATS SCORING & SKILL GAP ENGINE
 # ======================================================
 ROLE_SKILLS_MAP = {
     "Machine Learning Engineer": ["python", "tensorflow", "pytorch", "sql", "docker", "aws", "pandas"],
     "Full Stack Developer": ["react", "node.js", "javascript", "mongodb", "docker", "aws", "typescript", "html", "css"],
+    "Backend Developer": ["python", "java", "node.js", "sql", "postgresql", "mongodb", "api", "docker", "aws"],
+    "Frontend Developer": ["react", "javascript", "typescript", "html", "css", "vue", "angular", "tailwind"],
     "Data Analyst": ["sql", "excel", "python", "tableau", "powerbi", "statistics"],
     "DevOps Engineer": ["aws", "docker", "kubernetes", "linux", "ci/cd", "terraform", "python"],
+    "Cloud Engineer": ["aws", "azure", "gcp", "docker", "kubernetes", "linux", "terraform"],
+    "Security Engineer": ["cybersecurity", "linux", "network security", "penetration testing", "cryptography", "python"],
     "Software Developer": ["java", "c++", "python", "data structures", "algorithms", "sql", "git"],
     "Software Engineer": ["python", "java", "sql", "git", "agile", "aws", "docker"]
 }
@@ -87,21 +106,27 @@ def analyze_skill_gap(predicted_role, extracted_skills):
     else:
         matched_count = len(ideal_skills) - len(missing_skills)
         match_ratio = matched_count / len(ideal_skills)
-        ats_score = int(40 + (match_ratio * 60)) # Formula for realistic scoring
+        ats_score = int(40 + (match_ratio * 60)) 
         
     return missing_skills, ats_score
 
+# ======================================================
+# ☁️ CLOUD LIVE JOB FETCHER (GUARANTEES 3 INDIAN JOBS)
+# ======================================================
 def fetch_live_jobs(role, location="Bengaluru, India"):
     try:
+        print(f"☁️ Fetching live internet jobs for: {role} in India...")
+        
+        # Expanded API Search Terms
         search_term = "software"
-        if "Data" in role: 
-            search_term = "data"
-        elif "Machine Learning" in role: 
-            search_term = "machine learning"
-        elif "DevOps" in role: 
-            search_term = "devops"
-        elif "Developer" in role: 
-            search_term = "developer"
+        if "Data" in role: search_term = "data"
+        elif "Machine Learning" in role: search_term = "machine learning"
+        elif "DevOps" in role: search_term = "devops"
+        elif "Security" in role: search_term = "security"
+        elif "Cloud" in role: search_term = "cloud"
+        elif "Backend" in role: search_term = "backend"
+        elif "Frontend" in role: search_term = "frontend"
+        elif "Developer" in role: search_term = "developer"
 
         url = f"https://remotive.com/api/remote-jobs?search={search_term}&limit=20"
         response = requests.get(url, timeout=10)
@@ -123,6 +148,7 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
                     if len(jobs) == 3: 
                         break
         
+        # Fill gaps with reliable Indian Job Boards
         if len(jobs) < 3:
             encoded_role = role.replace(" ", "%20")
             naukri_role = role.replace(" ", "-").lower()
@@ -156,7 +182,8 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
                     
         return jobs
         
-    except Exception:
+    except Exception as e:
+        print(f"API Error: {e}")
         encoded_role = role.replace(" ", "%20")
         naukri_role = role.replace(" ", "-").lower()
         return [
@@ -165,6 +192,9 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
             {"title": f"{role}", "company": "Indeed", "location": "🇮🇳 India", "link": f"https://in.indeed.com/jobs?q={encoded_role}&l=India"}
         ]
 
+# ======================================================
+# API ROUTES
+# ======================================================
 @app.get("/")
 def home():
     return {"message": "AI Resume Recommender Backend Running"}
@@ -177,7 +207,7 @@ def health_check():
 async def upload_resume(files: List[UploadFile] = File(...)):
     try:
         results = []
-        collection.delete_many({}) 
+        collection.delete_many({}) # Clear old session data
 
         for file in files:
             validate_file(file.filename)
@@ -194,38 +224,39 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             if not extracted_skills:
                 extracted_skills = ["Python", "Problem Solving"] 
 
-       # 2. Predict Role
+            # Predict Role
             predicted_role = predict_best_role(extracted_skills)
 
-            # 🚀 NEW: Calculate ATS Score & Skill Gap
+            # Calculate ATS Score & Missing Skills
             missing_skills, ats_score = analyze_skill_gap(predicted_role, extracted_skills)
 
-            # 3. Fetch Live Jobs
+            # Fetch Live Jobs
             recommended_jobs = fetch_live_jobs(predicted_role)
 
-            # 4. Save to Database
+            # Save to Database
             candidate_data = {
                 "filename": file.filename,
                 "skills": extracted_skills,
                 "predicted_role": predicted_role,
-                "ats_score": ats_score, # Save to DB
+                "ats_score": ats_score, 
                 "uploaded_at": datetime.utcnow().isoformat()
             }
             save_candidate(candidate_data)
 
-            # 5. Build Final Response
+            # Build Response Payload
             results.append({
                 "filename": file.filename,
                 "extracted_skills": extracted_skills,
                 "predicted_role": predicted_role,
-                "missing_skills": missing_skills, # Send to Frontend
-                "ats_score": ats_score,           # Send to Frontend
+                "missing_skills": missing_skills,
+                "ats_score": ats_score,          
                 "recommended_jobs": recommended_jobs
             })
 
         return {"batch_results": results}
 
     except Exception as e:
+        print(f"Upload Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/rank_candidates")
@@ -275,6 +306,7 @@ async def generate_report(data: dict):
             filename=f"{safe_name}_Report.pdf"
         )
     except Exception as e:
+        print("PDF ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
