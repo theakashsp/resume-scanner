@@ -57,11 +57,18 @@ ROLE_DATABASE = {
     "Software Developer": ["java", "c++", "python", "data structures", "algorithms", "sql", "git", "c"]
 }
 
+# Import the new collection at the top of main.py
+from database import save_candidate, collection, roles_collection 
+
 def analyze_resume_roles(extracted_skills, top_n=3):
     """
-    Evaluates skills against all roles, calculates ATS and gaps, 
-    and returns the top N matched roles.
+    Evaluates skills against all roles by dynamically fetching them from MongoDB.
     """
+    # 1. FETCH ROLES DYNAMICALLY FROM DATABASE
+    dynamic_role_database = {}
+    for role_doc in roles_collection.find():
+        dynamic_role_database[role_doc["role"]] = role_doc["skills"]
+
     if not extracted_skills:
         return [{
             "predicted_role": "Software Engineer",
@@ -73,17 +80,37 @@ def analyze_resume_roles(extracted_skills, top_n=3):
     user_skills_set = set([str(skill).lower() for skill in extracted_skills])
     role_results = []
 
-    for role_name, required_skills in ROLE_DATABASE.items():
+    # Smart Categories (keep these here for the logic)
+    CORE_LANGUAGES = {"python", "java", "c++", "c#", "c", "javascript", "typescript", "ruby", "go"}
+    FRONTEND_FW = {"react", "angular", "vue"}
+    BACKEND_FW = {"node.js", "django", "fastapi", "spring boot"}
+    DATABASES = {"mongodb", "sql", "postgresql", "mysql"}
+    DEV_BONUS_SKILLS = {"aws", "docker", "kubernetes", "azure", "gcp"}
+
+    # 2. LOOP THROUGH THE DYNAMIC DATABASE
+    for role_name, required_skills in dynamic_role_database.items():
         req_skills_set = set([s.lower() for s in required_skills])
         
-        # Calculate intersection (matched) and difference (missing)
+        # Calculate base intersection (matched) and difference (missing)
         matched_skills = user_skills_set.intersection(req_skills_set)
         missing_skills = req_skills_set.difference(user_skills_set)
         
-        # Calculate ATS Match Score
-        if len(req_skills_set) > 0:
-            match_ratio = len(matched_skills) / len(req_skills_set)
-            ats_score = int(40 + (match_ratio * 60)) # Base 40% + Match Percentage
+        # --- (Keep all the Forgiveness Rules exactly as we wrote them previously) ---
+        if len(req_skills_set.intersection(CORE_LANGUAGES)) > 0 and len(matched_skills.intersection(CORE_LANGUAGES)) >= 1:
+            missing_skills = missing_skills - CORE_LANGUAGES
+        if len(req_skills_set.intersection(FRONTEND_FW)) > 0 and len(matched_skills.intersection(FRONTEND_FW)) >= 1:
+            missing_skills = missing_skills - FRONTEND_FW
+        if len(req_skills_set.intersection(BACKEND_FW)) > 0 and len(matched_skills.intersection(BACKEND_FW)) >= 1:
+            missing_skills = missing_skills - BACKEND_FW
+        if len(req_skills_set.intersection(DATABASES)) > 0 and len(matched_skills.intersection(DATABASES)) >= 1:
+            missing_skills = missing_skills - DATABASES
+        if role_name not in ["Cloud Engineer", "DevOps Engineer"]:
+            missing_skills = missing_skills - DEV_BONUS_SKILLS
+
+        effective_total_skills = len(matched_skills) + len(missing_skills)
+        if effective_total_skills > 0:
+            match_ratio = len(matched_skills) / effective_total_skills
+            ats_score = int(40 + (match_ratio * 60)) 
         else:
             ats_score = 0
             
@@ -94,13 +121,8 @@ def analyze_resume_roles(extracted_skills, top_n=3):
             "missing_skills": [skill.title() for skill in missing_skills]
         })
 
-    # Sort the list by ATS score in descending order (highest first)
     role_results = sorted(role_results, key=lambda x: x["ats_score"], reverse=True)
-
-    # Return only the top 'N' roles
     return role_results[:top_n]
-
-
 # ======================================================
 # ☁️ CLOUD LIVE JOB FETCHER
 # ======================================================

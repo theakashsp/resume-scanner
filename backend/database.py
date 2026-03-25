@@ -8,6 +8,13 @@ from pymongo.errors import ConnectionFailure
 # It will use your Cloud DB if you set an environment variable, 
 # otherwise, it safely falls back to your local MongoDB for testing.
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+# Inside database.py, make sure you have something like this:
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017/")
+db = client["resume_scanner_db"]
+collection = db["candidates"]
+roles_collection = db["roles"] # ADD THIS LINE
 
 DB_NAME = "careermatch_ai_db"
 COLLECTION_NAME = "candidates"
