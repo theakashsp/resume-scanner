@@ -15,7 +15,7 @@ from parser import parse_resume
 from database import save_candidate, collection
 from report_generator import generate_pdf_report
 
-app = FastAPI(title="AI Resume Scanner & Job Recommender", version="5.0 - Cloud Edition")
+app = FastAPI(title="AI Resume Scanner & Job Recommender", version="6.0 - Multi-Role Edition")
 
 # ======================================================
 # CORS CONFIGURATION
@@ -41,83 +41,73 @@ def validate_file(filename: str):
         )
 
 # ======================================================
-# 🧠 AI ROLE PREDICTION ENGINE (DYNAMIC DICTIONARY)
+# 🧠 UNIFIED AI ROLE PREDICTION & ATS SCORING ENGINE
 # ======================================================
-def predict_best_role(extracted_skills):
-    if not extracted_skills:
-        return "Software Engineer"
-        
-    skills = set([str(skill).lower() for skill in extracted_skills])
-    
-    # Define skill sets for expanded roles
-    role_definitions = {
-        "Machine Learning Engineer": {'python', 'machine learning', 'tensorflow', 'pytorch', 'data science', 'pandas', 'opencv', 'yolo'},
-        "Full Stack Developer": {'react', 'javascript', 'node.js', 'html', 'css', 'fastapi', 'django'},
-        "Backend Developer": {'python', 'java', 'node.js', 'sql', 'mongodb', 'django', 'fastapi', 'spring boot', 'api', 'postgresql'},
-        "Frontend Developer": {'react', 'angular', 'vue', 'html', 'css', 'javascript', 'typescript', 'tailwind'},
-        "Data Analyst": {'sql', 'excel', 'tableau', 'powerbi', 'data analysis', 'statistics'},
-        "DevOps Engineer": {'aws', 'docker', 'kubernetes', 'linux', 'ci/cd', 'terraform', 'jenkins'},
-        "Cloud Engineer": {'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'linux', 'terraform'},
-        "Security Engineer": {'cybersecurity', 'penetration testing', 'ethical hacking', 'network security', 'linux', 'cryptography'},
-        "Software Developer": {'c', 'java', 'c++', 'data structures', 'algorithms'}
-    }
 
-    # Calculate match score for each role
-    scores = {}
-    for role, required_skills in role_definitions.items():
-        scores[role] = len(skills.intersection(required_skills))
-        
-    # Find the role with the highest score
-    best_role = max(scores, key=scores.get)
-
-    # If no match found (score is 0), default to Software Engineer
-    if scores[best_role] == 0:
-        return "Software Engineer"
-        
-    return best_role
-
-# ======================================================
-# 📊 ATS SCORING & SKILL GAP ENGINE
-# ======================================================
-ROLE_SKILLS_MAP = {
-    "Machine Learning Engineer": ["python", "tensorflow", "pytorch", "sql", "docker", "aws", "pandas"],
-    "Full Stack Developer": ["react", "node.js", "javascript", "mongodb", "docker", "aws", "typescript", "html", "css"],
-    "Backend Developer": ["python", "java", "node.js", "sql", "postgresql", "mongodb", "api", "docker", "aws"],
+# Unified database combining definitions and skill maps
+ROLE_DATABASE = {
+    "Machine Learning Engineer": ["python", "tensorflow", "pytorch", "sql", "docker", "aws", "pandas", "machine learning", "data science", "opencv", "yolo"],
+    "Full Stack Developer": ["react", "node.js", "javascript", "mongodb", "docker", "aws", "typescript", "html", "css", "fastapi", "django"],
+    "Backend Developer": ["python", "java", "node.js", "sql", "postgresql", "mongodb", "api", "docker", "aws", "django", "fastapi", "spring boot"],
     "Frontend Developer": ["react", "javascript", "typescript", "html", "css", "vue", "angular", "tailwind"],
-    "Data Analyst": ["sql", "excel", "python", "tableau", "powerbi", "statistics"],
-    "DevOps Engineer": ["aws", "docker", "kubernetes", "linux", "ci/cd", "terraform", "python"],
+    "Data Analyst": ["sql", "excel", "python", "tableau", "powerbi", "statistics", "data analysis"],
+    "DevOps Engineer": ["aws", "docker", "kubernetes", "linux", "ci/cd", "terraform", "python", "jenkins"],
     "Cloud Engineer": ["aws", "azure", "gcp", "docker", "kubernetes", "linux", "terraform"],
-    "Security Engineer": ["cybersecurity", "linux", "network security", "penetration testing", "cryptography", "python"],
-    "Software Developer": ["java", "c++", "python", "data structures", "algorithms", "sql", "git"],
-    "Software Engineer": ["python", "java", "sql", "git", "agile", "aws", "docker"]
+    "Security Engineer": ["cybersecurity", "linux", "network security", "penetration testing", "cryptography", "python", "ethical hacking"],
+    "Software Developer": ["java", "c++", "python", "data structures", "algorithms", "sql", "git", "c"]
 }
 
-def analyze_skill_gap(predicted_role, extracted_skills):
-    """Calculates the ATS Score and identifies missing industry skills."""
-    ideal_skills = ROLE_SKILLS_MAP.get(predicted_role, [])
-    extracted_lower = [str(s).lower() for s in extracted_skills]
-    
-    # Find what the user is missing
-    missing_skills = [skill.title() for skill in ideal_skills if skill not in extracted_lower]
-    
-    # Calculate ATS Match Score (Base 40% + Skill Match Percentage)
-    if not ideal_skills:
-        ats_score = 75 # Default score if role is unknown
-    else:
-        matched_count = len(ideal_skills) - len(missing_skills)
-        match_ratio = matched_count / len(ideal_skills)
-        ats_score = int(40 + (match_ratio * 60)) 
+def analyze_resume_roles(extracted_skills, top_n=3):
+    """
+    Evaluates skills against all roles, calculates ATS and gaps, 
+    and returns the top N matched roles.
+    """
+    if not extracted_skills:
+        return [{
+            "predicted_role": "Software Engineer",
+            "ats_score": 50,
+            "matched_skills": [],
+            "missing_skills": ["Python", "SQL", "Git", "Agile"]
+        }]
+
+    user_skills_set = set([str(skill).lower() for skill in extracted_skills])
+    role_results = []
+
+    for role_name, required_skills in ROLE_DATABASE.items():
+        req_skills_set = set([s.lower() for s in required_skills])
         
-    return missing_skills, ats_score
+        # Calculate intersection (matched) and difference (missing)
+        matched_skills = user_skills_set.intersection(req_skills_set)
+        missing_skills = req_skills_set.difference(user_skills_set)
+        
+        # Calculate ATS Match Score
+        if len(req_skills_set) > 0:
+            match_ratio = len(matched_skills) / len(req_skills_set)
+            ats_score = int(40 + (match_ratio * 60)) # Base 40% + Match Percentage
+        else:
+            ats_score = 0
+            
+        role_results.append({
+            "predicted_role": role_name,
+            "ats_score": ats_score,
+            "matched_skills": [skill.title() for skill in matched_skills],
+            "missing_skills": [skill.title() for skill in missing_skills]
+        })
+
+    # Sort the list by ATS score in descending order (highest first)
+    role_results = sorted(role_results, key=lambda x: x["ats_score"], reverse=True)
+
+    # Return only the top 'N' roles
+    return role_results[:top_n]
+
 
 # ======================================================
-# ☁️ CLOUD LIVE JOB FETCHER (GUARANTEES 3 INDIAN JOBS)
+# ☁️ CLOUD LIVE JOB FETCHER
 # ======================================================
 def fetch_live_jobs(role, location="Bengaluru, India"):
     try:
         print(f"☁️ Fetching live internet jobs for: {role} in India...")
         
-        # Expanded API Search Terms
         search_term = "software"
         if "Data" in role: search_term = "data"
         elif "Machine Learning" in role: search_term = "machine learning"
@@ -224,33 +214,32 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             if not extracted_skills:
                 extracted_skills = ["Python", "Problem Solving"] 
 
-            # Predict Role
-            predicted_role = predict_best_role(extracted_skills)
+            # 1. Get Top 3 Predicted Roles and their specific ATS/Gap data
+            top_career_paths = analyze_resume_roles(extracted_skills, top_n=3)
 
-            # Calculate ATS Score & Missing Skills
-            missing_skills, ats_score = analyze_skill_gap(predicted_role, extracted_skills)
+            # 2. Fetch Live Jobs for EACH of the top roles
+            for path in top_career_paths:
+                path["recommended_jobs"] = fetch_live_jobs(path["predicted_role"])
 
-            # Fetch Live Jobs
-            recommended_jobs = fetch_live_jobs(predicted_role)
+            # 3. Save to Database (Saving the primary role for top-level stats, but logging all paths)
+            primary_role = top_career_paths[0]["predicted_role"]
+            primary_ats = top_career_paths[0]["ats_score"]
 
-            # Save to Database
             candidate_data = {
                 "filename": file.filename,
                 "skills": extracted_skills,
-                "predicted_role": predicted_role,
-                "ats_score": ats_score, 
+                "primary_predicted_role": primary_role,
+                "primary_ats_score": primary_ats, 
+                "career_paths": top_career_paths, # Saving the full array
                 "uploaded_at": datetime.utcnow().isoformat()
             }
             save_candidate(candidate_data)
 
-            # Build Response Payload
+            # 4. Build Response Payload for the Frontend
             results.append({
                 "filename": file.filename,
                 "extracted_skills": extracted_skills,
-                "predicted_role": predicted_role,
-                "missing_skills": missing_skills,
-                "ats_score": ats_score,          
-                "recommended_jobs": recommended_jobs
+                "career_paths": top_career_paths # This array replaces the single outputs
             })
 
         return {"batch_results": results}

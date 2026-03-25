@@ -43,7 +43,7 @@ function App() {
       setBatchResults([]);
       
       setTimeout(() => setStatusMsg("EXTRACTING DEEP SKILLS..."), 1000);
-      setTimeout(() => setStatusMsg("CALCULATING ATS SCORE..."), 2000);
+      setTimeout(() => setStatusMsg("EVALUATING MULTIPLE CAREER PATHS..."), 2000);
       setTimeout(() => setStatusMsg("MATCHING LIVE JOBS IN INDIA..."), 3000);
 
       const response = await axios.post(`${API_BASE}/upload_resume/`, formData, { 
@@ -60,14 +60,15 @@ function App() {
     }
   };
 
-  const handleDownloadPDF = async (res) => {
+  // Updated to accept both the root file result and the specific career path
+  const handleDownloadPDF = async (res, path) => {
     try {
       const response = await axios.post(`${API_BASE}/generate_report/`, {
         filename: res.filename,
-        predicted_role: res.predicted_role,
-        extracted_skills: res.extracted_skills,
-        missing_skills: res.missing_skills,
-        ats_score: res.ats_score
+        predicted_role: path.predicted_role,
+        extracted_skills: res.extracted_skills, // All skills found
+        missing_skills: path.missing_skills,    // Skills missing for THIS role
+        ats_score: path.ats_score               // Score for THIS role
       }, {
         responseType: 'blob'
       });
@@ -75,7 +76,7 @@ function App() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${res.filename.split('.')[0]}_ATS_Report.pdf`);
+      link.setAttribute('download', `${res.filename.split('.')[0]}_${path.predicted_role.replace(/\s+/g, '_')}_Report.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -104,7 +105,7 @@ function App() {
       <div className="card">
         <h2>📁 Upload Your Resume</h2>
         <p style={{ color: '#64748b', marginBottom: '30px', fontWeight: '600', fontSize: '14px' }}>
-          Let our AI analyze your skills, calculate your ATS score, and find the best live jobs.
+          Let our AI analyze your skills, calculate your ATS score, and find the best live jobs across multiple tech roles.
         </p>
 
         <div className="upload-container">
@@ -150,79 +151,84 @@ function App() {
           
           {batchResults.map((res, index) => (
             <div key={index}>
-              
-              <div style={{ background: '#eff6ff', padding: '35px', borderRadius: '24px', border: '1px solid #bfdbfe', marginBottom: '45px', position: 'relative' }}>
-                
-                <button 
-                  onClick={() => handleDownloadPDF(res)}
-                  className="secondary-btn"
-                  style={{ position: 'absolute', top: '35px', right: '35px' }}
-                >
-                  📥 Download PDF
-                </button>
-
-                <h3 style={{ color: '#1e40af', marginBottom: '25px', fontSize: '28px', fontWeight: '800' }}>
-                  Predicted Role: {res.predicted_role}
-                </h3>
-                
-                <div className="ats-container">
-                  <div className="ats-header">
-                    <span className="ats-title">ATS Match Score</span>
-                    <span className="ats-score-text">{res.ats_score ? res.ats_score : '75'}%</span>
+              {/* Loop through the newly created career_paths array from the backend */}
+              {res.career_paths && res.career_paths.map((path, pIndex) => (
+                <div key={pIndex} style={{ background: '#eff6ff', padding: '35px', borderRadius: '24px', border: '1px solid #bfdbfe', marginBottom: '45px', position: 'relative' }}>
+                  
+                  {/* Badge indicating match strength */}
+                  <div style={{ position: 'absolute', top: '-15px', left: '35px', background: pIndex === 0 ? '#3b82f6' : '#64748b', color: 'white', padding: '5px 15px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>
+                    {pIndex === 0 ? "🥇 Top Match" : pIndex === 1 ? "🥈 Strong Match" : "🥉 Alternative Path"}
                   </div>
-                  <div className="progress-bar-bg">
-                    <div className="progress-bar-fill" style={{ width: `${res.ats_score ? res.ats_score : 75}%` }}></div>
-                  </div>
-                </div>
 
-                <p style={{fontSize:'12px', fontWeight:'800', color: '#64748b', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
-                  ✅ Verified Professional Skills:
-                </p>
-                <div className="skills-container" style={{ marginTop: '15px' }}>
-                  {res.extracted_skills?.map((s, i) => (
-                    <span key={i} className="skill-tag matched">{s}</span>
-                  ))}
-                </div>
+                  <button 
+                    onClick={() => handleDownloadPDF(res, path)}
+                    className="secondary-btn"
+                    style={{ position: 'absolute', top: '35px', right: '35px' }}
+                  >
+                    📥 Download PDF
+                  </button>
 
-                {res.missing_skills && res.missing_skills.length > 0 && (
-                  <>
-                    <p style={{fontSize:'12px', fontWeight:'800', color: '#e11d48', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
-                      ⚠️ Skill Gap (Learn these to get hired):
-                    </p>
-                    <div className="skills-container" style={{ marginTop: '15px' }}>
-                      {res.missing_skills.map((s, i) => (
-                        <span key={i} className="skill-tag missing">{s}</span>
-                      ))}
+                  <h3 style={{ color: '#1e40af', marginBottom: '25px', fontSize: '28px', fontWeight: '800', marginTop: '10px' }}>
+                    Predicted Role: {path.predicted_role}
+                  </h3>
+                  
+                  <div className="ats-container">
+                    <div className="ats-header">
+                      <span className="ats-title">ATS Match Score</span>
+                      <span className="ats-score-text">{path.ats_score ? path.ats_score : '75'}%</span>
                     </div>
-                  </>
-                )}
-              </div>
+                    <div className="progress-bar-bg">
+                      <div className="progress-bar-fill" style={{ width: `${path.ats_score ? path.ats_score : 75}%`, backgroundColor: path.ats_score > 70 ? '#22c55e' : '#eab308' }}></div>
+                    </div>
+                  </div>
 
-              <div style={{ borderTop: '2px solid #f1f5f9', paddingTop: '45px' }}>
-                <h3 style={{ color: '#0f172a', fontWeight: '800', fontSize: '22px', marginBottom: '10px' }}>💼 Recommended Roles in India</h3>
-                <p style={{ color: '#64748b', fontSize: '14px', marginBottom: '35px', fontWeight: '500' }}>
-                  Top market opportunities identified across India based on your profile.
-                </p>
-                
-                <div className="job-grid">
-                  {res.recommended_jobs && res.recommended_jobs.length > 0 ? (
-                    res.recommended_jobs.map((job, j) => (
-                      <div key={j} className="job-card">
-                        <div>
-                          <div className="job-title" style={{ fontSize: '15px', marginBottom: '12px' }}>{job.title}</div>
-                          <div className="job-company" style={{ fontWeight: '700' }}>🏢 {job.company}</div>
-                          <div className="job-location" style={{ fontSize: '12px' }}>🇮🇳 {job.location}</div>
-                        </div>
-                        <a href={job.link} target="_blank" rel="noopener noreferrer" className="apply-btn">
-                          Apply Now
-                        </a>
+                  <p style={{fontSize:'12px', fontWeight:'800', color: '#64748b', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
+                    ✅ Verified Professional Skills for this role:
+                  </p>
+                  <div className="skills-container" style={{ marginTop: '15px' }}>
+                    {path.matched_skills?.length > 0 ? path.matched_skills.map((s, i) => (
+                      <span key={i} className="skill-tag matched">{s}</span>
+                    )) : <span style={{fontSize: '14px', color: '#64748b'}}>No core skills matched.</span>}
+                  </div>
+
+                  {path.missing_skills && path.missing_skills.length > 0 && (
+                    <>
+                      <p style={{fontSize:'12px', fontWeight:'800', color: '#e11d48', marginTop:'25px', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
+                        ⚠️ Skill Gap (Learn these to get hired):
+                      </p>
+                      <div className="skills-container" style={{ marginTop: '15px' }}>
+                        {path.missing_skills.map((s, i) => (
+                          <span key={i} className="skill-tag missing">{s}</span>
+                        ))}
                       </div>
-                    ))
-                  ) : (
-                    <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>No live Indian jobs found. Please try again later.</p>
+                    </>
                   )}
+                
+
+                  <div style={{ borderTop: '2px solid #e2e8f0', paddingTop: '30px', marginTop: '30px' }}>
+                    <h3 style={{ color: '#0f172a', fontWeight: '800', fontSize: '20px', marginBottom: '10px' }}>💼 Recommended Jobs for {path.predicted_role}</h3>
+                    
+                    <div className="job-grid">
+                      {path.recommended_jobs && path.recommended_jobs.length > 0 ? (
+                        path.recommended_jobs.map((job, j) => (
+                          <div key={j} className="job-card" style={{ background: 'white' }}>
+                            <div>
+                              <div className="job-title" style={{ fontSize: '15px', marginBottom: '12px' }}>{job.title}</div>
+                              <div className="job-company" style={{ fontWeight: '700' }}>🏢 {job.company}</div>
+                              <div className="job-location" style={{ fontSize: '12px' }}>🇮🇳 {job.location}</div>
+                            </div>
+                            <a href={job.link} target="_blank" rel="noopener noreferrer" className="apply-btn">
+                              Apply Now
+                            </a>
+                          </div>
+                        ))
+                      ) : (
+                        <p style={{ color: '#94a3b8', fontStyle: 'italic' }}>No live jobs found for this specific role.</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           ))}
         </div>
