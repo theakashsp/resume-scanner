@@ -12,10 +12,10 @@ import shutil
 import os
 
 from parser import parse_resume
-from database import save_candidate, collection
+from database import save_candidate, collection, roles_collection
 from report_generator import generate_pdf_report
 
-app = FastAPI(title="AI Resume Scanner & Job Recommender", version="6.0 - Multi-Role Edition")
+app = FastAPI(title="AI Resume Scanner & Job Recommender", version="6.0 - Multi-Role Cloud Edition")
 
 # ======================================================
 # CORS CONFIGURATION
@@ -41,33 +41,25 @@ def validate_file(filename: str):
         )
 
 # ======================================================
-# 🧠 UNIFIED AI ROLE PREDICTION & ATS SCORING ENGINE
+# 🧠 DYNAMIC AI ROLE PREDICTION & ATS SCORING ENGINE
 # ======================================================
-
-# Unified database combining definitions and skill maps
-ROLE_DATABASE = {
-    "Machine Learning Engineer": ["python", "tensorflow", "pytorch", "sql", "docker", "aws", "pandas", "machine learning", "data science", "opencv", "yolo"],
-    "Full Stack Developer": ["react", "node.js", "javascript", "mongodb", "docker", "aws", "typescript", "html", "css", "fastapi", "django"],
-    "Backend Developer": ["python", "java", "node.js", "sql", "postgresql", "mongodb", "api", "docker", "aws", "django", "fastapi", "spring boot"],
-    "Frontend Developer": ["react", "javascript", "typescript", "html", "css", "vue", "angular", "tailwind"],
-    "Data Analyst": ["sql", "excel", "python", "tableau", "powerbi", "statistics", "data analysis"],
-    "DevOps Engineer": ["aws", "docker", "kubernetes", "linux", "ci/cd", "terraform", "python", "jenkins"],
-    "Cloud Engineer": ["aws", "azure", "gcp", "docker", "kubernetes", "linux", "terraform"],
-    "Security Engineer": ["cybersecurity", "linux", "network security", "penetration testing", "cryptography", "python", "ethical hacking"],
-    "Software Developer": ["java", "c++", "python", "data structures", "algorithms", "sql", "git", "c"]
-}
-
-# Import the new collection at the top of main.py
-from database import save_candidate, collection, roles_collection 
-
 def analyze_resume_roles(extracted_skills, top_n=3):
     """
     Evaluates skills against all roles by dynamically fetching them from MongoDB.
+    Includes fallback protection if the database is empty.
     """
     # 1. FETCH ROLES DYNAMICALLY FROM DATABASE
     dynamic_role_database = {}
     for role_doc in roles_collection.find():
-        dynamic_role_database[role_doc["role"]] = role_doc["skills"]
+        dynamic_role_database[role_doc["role"]] = role_doc.get("skills", [])
+
+    # 🛑 SAFETY NET: If the MongoDB collection is empty, use a fallback to prevent crashes
+    if not dynamic_role_database:
+        print("⚠️ WARNING: MongoDB roles database is empty! Using default fallback.")
+        dynamic_role_database = {
+            "Software Engineer": ["python", "java", "sql", "git", "aws", "docker"],
+            "Data Analyst": ["python", "sql", "excel", "tableau", "statistics"]
+        }
 
     if not extracted_skills:
         return [{
@@ -80,7 +72,7 @@ def analyze_resume_roles(extracted_skills, top_n=3):
     user_skills_set = set([str(skill).lower() for skill in extracted_skills])
     role_results = []
 
-    # Smart Categories (keep these here for the logic)
+    # Smart Categories (Forgiveness Logic)
     CORE_LANGUAGES = {"python", "java", "c++", "c#", "c", "javascript", "typescript", "ruby", "go"}
     FRONTEND_FW = {"react", "angular", "vue"}
     BACKEND_FW = {"node.js", "django", "fastapi", "spring boot"}
@@ -95,7 +87,7 @@ def analyze_resume_roles(extracted_skills, top_n=3):
         matched_skills = user_skills_set.intersection(req_skills_set)
         missing_skills = req_skills_set.difference(user_skills_set)
         
-        # --- (Keep all the Forgiveness Rules exactly as we wrote them previously) ---
+        # --- Forgiveness Rules ---
         if len(req_skills_set.intersection(CORE_LANGUAGES)) > 0 and len(matched_skills.intersection(CORE_LANGUAGES)) >= 1:
             missing_skills = missing_skills - CORE_LANGUAGES
         if len(req_skills_set.intersection(FRONTEND_FW)) > 0 and len(matched_skills.intersection(FRONTEND_FW)) >= 1:
@@ -121,8 +113,11 @@ def analyze_resume_roles(extracted_skills, top_n=3):
             "missing_skills": [skill.title() for skill in missing_skills]
         })
 
+    # Sort the list by ATS score in descending order (highest first)
     role_results = sorted(role_results, key=lambda x: x["ats_score"], reverse=True)
+    
     return role_results[:top_n]
+
 # ======================================================
 # ☁️ CLOUD LIVE JOB FETCHER
 # ======================================================
@@ -239,11 +234,20 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             # 1. Get Top 3 Predicted Roles and their specific ATS/Gap data
             top_career_paths = analyze_resume_roles(extracted_skills, top_n=3)
 
+            # 🛑 DOUBLE SAFETY NET: Ensure the array isn't empty before accessing index 0
+            if not top_career_paths:
+                top_career_paths = [{
+                    "predicted_role": "Software Engineer",
+                    "ats_score": 50,
+                    "matched_skills": [],
+                    "missing_skills": ["Python", "SQL", "Git", "Agile"]
+                }]
+
             # 2. Fetch Live Jobs for EACH of the top roles
             for path in top_career_paths:
                 path["recommended_jobs"] = fetch_live_jobs(path["predicted_role"])
 
-            # 3. Save to Database (Saving the primary role for top-level stats, but logging all paths)
+            # 3. Save to Database
             primary_role = top_career_paths[0]["predicted_role"]
             primary_ats = top_career_paths[0]["ats_score"]
 
@@ -252,7 +256,7 @@ async def upload_resume(files: List[UploadFile] = File(...)):
                 "skills": extracted_skills,
                 "primary_predicted_role": primary_role,
                 "primary_ats_score": primary_ats, 
-                "career_paths": top_career_paths, # Saving the full array
+                "career_paths": top_career_paths, 
                 "uploaded_at": datetime.utcnow().isoformat()
             }
             save_candidate(candidate_data)
@@ -261,7 +265,7 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             results.append({
                 "filename": file.filename,
                 "extracted_skills": extracted_skills,
-                "career_paths": top_career_paths # This array replaces the single outputs
+                "career_paths": top_career_paths 
             })
 
         return {"batch_results": results}
