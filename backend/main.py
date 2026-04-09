@@ -13,14 +13,24 @@ import os
 import json
 import google.generativeai as genai
 
-from parser import parse_resume
-from database import save_candidate, collection
-from report_generator import generate_pdf_report
+# 💡 NEW: Import dotenv to read hidden files
+from dotenv import load_dotenv
+
+# 💡 NEW: Load the hidden variables from your .env file
+load_dotenv()
 
 # ======================================================
-# 🔑 CONFIGURE YOUR AI API KEY HERE
+# 🔑 SECURE API CONFIGURATION
 # ======================================================
-genai.configure(api_key="AIzaSyAUwVBnlw6FaVkmezpFRAjNf42Sq9s3c8M")
+# Instead of hardcoding the key, we grab it from the OS environment!
+api_key = os.getenv("GEMINI_API_KEY")
+
+if not api_key:
+    raise ValueError("⚠️ No API Key found! Check your .env file.")
+
+genai.configure(api_key=api_key)
+
+# ... (the rest of your main.py code stays exactly the same) ...
 
 app = FastAPI(title="AI Resume Scanner & Job Recommender", version="12.0 - Gemini 2.5 Upgrade")
 
