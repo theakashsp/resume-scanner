@@ -12,25 +12,23 @@ import shutil
 import os
 import json
 import google.generativeai as genai
-
-# 💡 NEW: Import dotenv to read hidden files
 from dotenv import load_dotenv
 
-# 💡 NEW: Load the hidden variables from your .env file
-load_dotenv()
+# Local application imports
+from parser import parse_resume
+from database import save_candidate, collection
+from report_generator import generate_pdf_report
 
 # ======================================================
-# 🔑 SECURE API CONFIGURATION
+# 🔑 API CONFIGURATION (Secure .env Loading)
 # ======================================================
-# Instead of hardcoding the key, we grab it from the OS environment!
+load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    raise ValueError("⚠️ No API Key found! Check your .env file.")
+    raise ValueError("⚠️ No API Key found! Make sure you have a .env file with GEMINI_API_KEY set.")
 
 genai.configure(api_key=api_key)
-
-# ... (the rest of your main.py code stays exactly the same) ...
 
 app = FastAPI(title="AI Resume Scanner & Job Recommender", version="12.0 - Gemini 2.5 Upgrade")
 
@@ -90,38 +88,35 @@ def analyze_resume_roles(extracted_skills, top_n=3):
     """
     
     try:
-                    model = genai.GenerativeModel('gemini-2.5-flash')
-                    response = model.generate_content(
-                        prompt,
-                        generation_config={"response_mime_type": "application/json"}
-                    )
-                    
-                    # 💡 BULLETPROOF JSON CLEANER: 
-                    # This forces Python to only extract the text between the first '[' and last ']'
-                    raw_text = response.text.replace("```json", "").replace("```", "").strip()
-                    start_idx = raw_text.find('[')
-                    end_idx = raw_text.rfind(']')
-                    
-                    if start_idx != -1 and end_idx != -1:
-                        clean_text = raw_text[start_idx:end_idx+1]
-                    else:
-                        clean_text = raw_text
-                        
-                    ai_results = json.loads(clean_text)
-                    return ai_results
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
+        
+        # BULLETPROOF JSON CLEANER
+        raw_text = response.text.replace("```json", "").replace("```", "").strip()
+        start_idx = raw_text.find('[')
+        end_idx = raw_text.rfind(']')
+        
+        if start_idx != -1 and end_idx != -1:
+            clean_text = raw_text[start_idx:end_idx+1]
+        else:
+            clean_text = raw_text
+            
+        ai_results = json.loads(clean_text)
+        return ai_results
 
     except Exception as e:
-                    print(f"⚠️ AI API Error: {e}")
-                    error_msg = str(e).replace('"', "'")[:60]
-                    return [{
-                        "predicted_role": f"API Error (Check Key): {error_msg}",
-                        "ats_score": 0,
-                        "matched_skills": [],
-                        "missing_skills": ["Generate a NEW API Key", "Paste in main.py", "Restart Server"]
-                    }]
-# ======================================================
-# ☁️ CLOUD LIVE JOB FETCHER
-# ======================================================
+        print(f"⚠️ AI API Error: {e}")
+        error_msg = str(e).replace('"', "'")[:60]
+        return [{
+            "predicted_role": f"API Error (Check Key): {error_msg}",
+            "ats_score": 0,
+            "matched_skills": [],
+            "missing_skills": ["Generate a NEW API Key", "Paste in main.py", "Restart Server"]
+        }]
+
 # ======================================================
 # ☁️ CLOUD LIVE JOB FETCHER
 # ======================================================
@@ -139,8 +134,8 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
         elif "Frontend" in role: search_term = "frontend"
         elif "Developer" in role: search_term = "developer"
 
-        # 💡 PERMANENT FIX: String concatenation prevents markdown corruption!
-        url = "https://" + "remotive.com/api/remote-jobs?search=" + search_term + "&limit=20"
+        # URL Markdown fix
+        url = f"[https://remotive.com/api/remote-jobs?search=](https://remotive.com/api/remote-jobs?search=){search_term}&limit=20"
         response = requests.get(url, timeout=10)
         data = response.json()
         
@@ -169,19 +164,19 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
                     "title": f"{role} (Actively Hiring)", 
                     "company": "LinkedIn India", 
                     "location": "🇮🇳 Bengaluru / Remote", 
-                    "link": "https://" + "www.linkedin.com/jobs/search/?keywords=" + encoded_role + "&location=India"
+                    "link": f"[https://www.linkedin.com/jobs/search/?keywords=](https://www.linkedin.com/jobs/search/?keywords=){encoded_role}&location=India"
                 },
                 {
                     "title": f"{role} - Tech Roles", 
                     "company": "Naukri.com", 
                     "location": "🇮🇳 India", 
-                    "link": "https://" + "www.naukri.com/" + naukri_role + "-jobs-in-india"
+                    "link": f"[https://www.naukri.com/](https://www.naukri.com/){naukri_role}-jobs-in-india"
                 },
                 {
                     "title": f"Senior {role}", 
                     "company": "Indeed India", 
                     "location": "🇮🇳 Remote India", 
-                    "link": "https://" + "in.indeed.com/jobs?q=" + encoded_role + "&l=India"
+                    "link": f"[https://in.indeed.com/jobs?q=](https://in.indeed.com/jobs?q=){encoded_role}&l=India"
                 }
             ]
             
@@ -198,9 +193,9 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
         encoded_role = role.replace(" ", "%20")
         naukri_role = role.replace(" ", "-").lower()
         return [
-            {"title": f"{role}", "company": "LinkedIn", "location": "🇮🇳 India", "link": "https://" + "www.linkedin.com/jobs/search/?keywords=" + encoded_role + "&location=India"},
-            {"title": f"{role}", "company": "Naukri", "location": "🇮🇳 India", "link": "https://" + "www.naukri.com/" + naukri_role + "-jobs-in-india"},
-            {"title": f"{role}", "company": "Indeed", "location": "🇮🇳 India", "link": "https://" + "in.indeed.com/jobs?q=" + encoded_role + "&l=India"}
+            {"title": f"{role}", "company": "LinkedIn", "location": "🇮🇳 India", "link": f"[https://www.linkedin.com/jobs/search/?keywords=](https://www.linkedin.com/jobs/search/?keywords=){encoded_role}&location=India"},
+            {"title": f"{role}", "company": "Naukri", "location": "🇮🇳 India", "link": f"[https://www.naukri.com/](https://www.naukri.com/){naukri_role}-jobs-in-india"},
+            {"title": f"{role}", "company": "Indeed", "location": "🇮🇳 India", "link": f"[https://in.indeed.com/jobs?q=](https://in.indeed.com/jobs?q=){encoded_role}&l=India"}
         ]
 
 # ======================================================
