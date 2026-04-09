@@ -10,12 +10,19 @@ from datetime import datetime
 from typing import List
 import shutil
 import os
+import json
+import google.generativeai as genai
 
 from parser import parse_resume
-from database import save_candidate, collection, roles_collection
+from database import save_candidate, collection
 from report_generator import generate_pdf_report
 
-app = FastAPI(title="AI Resume Scanner & Job Recommender", version="6.0 - Multi-Role Cloud Edition")
+# ======================================================
+# 🔑 CONFIGURE YOUR AI API KEY HERE
+# ======================================================
+genai.configure(api_key="AIzaSyAUwVBnlw6FaVkmezpFRAjNf42Sq9s3c8M")
+
+app = FastAPI(title="AI Resume Scanner & Job Recommender", version="12.0 - Gemini 2.5 Upgrade")
 
 # ======================================================
 # CORS CONFIGURATION
@@ -41,83 +48,70 @@ def validate_file(filename: str):
         )
 
 # ======================================================
-# 🧠 DYNAMIC AI ROLE PREDICTION & ATS SCORING ENGINE
+# 🧠 GEMINI LLM ROLE PREDICTION & ATS ENGINE
 # ======================================================
 def analyze_resume_roles(extracted_skills, top_n=3):
-    """
-    Evaluates skills against all roles by dynamically fetching them from MongoDB.
-    Includes fallback protection if the database is empty.
-    """
-    # 1. FETCH ROLES DYNAMICALLY FROM DATABASE
-    dynamic_role_database = {}
-    for role_doc in roles_collection.find():
-        dynamic_role_database[role_doc["role"]] = role_doc.get("skills", [])
-
-    # 🛑 SAFETY NET: If the MongoDB collection is empty, use a fallback to prevent crashes
-    if not dynamic_role_database:
-        print("⚠️ WARNING: MongoDB roles database is empty! Using default fallback.")
-        dynamic_role_database = {
-            "Software Engineer": ["python", "java", "sql", "git", "aws", "docker"],
-            "Data Analyst": ["python", "sql", "excel", "tableau", "statistics"]
-        }
-
     if not extracted_skills:
         return [{
             "predicted_role": "Software Engineer",
             "ats_score": 50,
             "matched_skills": [],
-            "missing_skills": ["Python", "SQL", "Git", "Agile"]
+            "missing_skills": ["Python", "SQL", "Git"]
         }]
 
-    user_skills_set = set([str(skill).lower() for skill in extracted_skills])
-    role_results = []
-
-    # Smart Categories (Forgiveness Logic)
-    CORE_LANGUAGES = {"python", "java", "c++", "c#", "c", "javascript", "typescript", "ruby", "go"}
-    FRONTEND_FW = {"react", "angular", "vue"}
-    BACKEND_FW = {"node.js", "django", "fastapi", "spring boot"}
-    DATABASES = {"mongodb", "sql", "postgresql", "mysql"}
-    DEV_BONUS_SKILLS = {"aws", "docker", "kubernetes", "azure", "gcp"}
-
-    # 2. LOOP THROUGH THE DYNAMIC DATABASE
-    for role_name, required_skills in dynamic_role_database.items():
-        req_skills_set = set([s.lower() for s in required_skills])
-        
-        # Calculate base intersection (matched) and difference (missing)
-        matched_skills = user_skills_set.intersection(req_skills_set)
-        missing_skills = req_skills_set.difference(user_skills_set)
-        
-        # --- Forgiveness Rules ---
-        if len(req_skills_set.intersection(CORE_LANGUAGES)) > 0 and len(matched_skills.intersection(CORE_LANGUAGES)) >= 1:
-            missing_skills = missing_skills - CORE_LANGUAGES
-        if len(req_skills_set.intersection(FRONTEND_FW)) > 0 and len(matched_skills.intersection(FRONTEND_FW)) >= 1:
-            missing_skills = missing_skills - FRONTEND_FW
-        if len(req_skills_set.intersection(BACKEND_FW)) > 0 and len(matched_skills.intersection(BACKEND_FW)) >= 1:
-            missing_skills = missing_skills - BACKEND_FW
-        if len(req_skills_set.intersection(DATABASES)) > 0 and len(matched_skills.intersection(DATABASES)) >= 1:
-            missing_skills = missing_skills - DATABASES
-        if role_name not in ["Cloud Engineer", "DevOps Engineer"]:
-            missing_skills = missing_skills - DEV_BONUS_SKILLS
-
-        effective_total_skills = len(matched_skills) + len(missing_skills)
-        if effective_total_skills > 0:
-            match_ratio = len(matched_skills) / effective_total_skills
-            ats_score = int(40 + (match_ratio * 60)) 
-        else:
-            ats_score = 0
-            
-        role_results.append({
-            "predicted_role": role_name,
-            "ats_score": ats_score,
-            "matched_skills": [skill.title() for skill in matched_skills],
-            "missing_skills": [skill.title() for skill in missing_skills]
-        })
-
-    # Sort the list by ATS score in descending order (highest first)
-    role_results = sorted(role_results, key=lambda x: x["ats_score"], reverse=True)
+    prompt = f"""
+    You are an expert IT Recruiter and ATS system. 
+    A candidate has the following skills: {', '.join(extracted_skills)}
     
-    return role_results[:top_n]
+    Predict the top {top_n} best-fitting tech job roles for this candidate. 
+    For each role, calculate a realistic ATS match score (0-100) based on industry standards.
+    Identify which of their skills match the role, and list 3-5 core industry skills they are missing.
+    
+    Return the result strictly as a raw JSON array of objects. Do not include markdown formatting like ```json.
+    Use this exact structure:
+    [
+      {{
+        "predicted_role": "Role Name",
+        "ats_score": 85,
+        "matched_skills": ["Skill1", "Skill2"],
+        "missing_skills": ["Missing1", "Missing2"]
+      }}
+    ]
+    """
+    
+    try:
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    response = model.generate_content(
+                        prompt,
+                        generation_config={"response_mime_type": "application/json"}
+                    )
+                    
+                    # 💡 BULLETPROOF JSON CLEANER: 
+                    # This forces Python to only extract the text between the first '[' and last ']'
+                    raw_text = response.text.replace("```json", "").replace("```", "").strip()
+                    start_idx = raw_text.find('[')
+                    end_idx = raw_text.rfind(']')
+                    
+                    if start_idx != -1 and end_idx != -1:
+                        clean_text = raw_text[start_idx:end_idx+1]
+                    else:
+                        clean_text = raw_text
+                        
+                    ai_results = json.loads(clean_text)
+                    return ai_results
 
+    except Exception as e:
+                    print(f"⚠️ AI API Error: {e}")
+                    error_msg = str(e).replace('"', "'")[:60]
+                    return [{
+                        "predicted_role": f"API Error (Check Key): {error_msg}",
+                        "ats_score": 0,
+                        "matched_skills": [],
+                        "missing_skills": ["Generate a NEW API Key", "Paste in main.py", "Restart Server"]
+                    }]
+# ======================================================
+# ☁️ CLOUD LIVE JOB FETCHER
+# ======================================================
 # ======================================================
 # ☁️ CLOUD LIVE JOB FETCHER
 # ======================================================
@@ -135,7 +129,8 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
         elif "Frontend" in role: search_term = "frontend"
         elif "Developer" in role: search_term = "developer"
 
-        url = f"https://remotive.com/api/remote-jobs?search={search_term}&limit=20"
+        # 💡 PERMANENT FIX: String concatenation prevents markdown corruption!
+        url = "https://" + "remotive.com/api/remote-jobs?search=" + search_term + "&limit=20"
         response = requests.get(url, timeout=10)
         data = response.json()
         
@@ -155,7 +150,6 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
                     if len(jobs) == 3: 
                         break
         
-        # Fill gaps with reliable Indian Job Boards
         if len(jobs) < 3:
             encoded_role = role.replace(" ", "%20")
             naukri_role = role.replace(" ", "-").lower()
@@ -165,19 +159,19 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
                     "title": f"{role} (Actively Hiring)", 
                     "company": "LinkedIn India", 
                     "location": "🇮🇳 Bengaluru / Remote", 
-                    "link": f"https://www.linkedin.com/jobs/search/?keywords={encoded_role}&location=India&geoId=102713980"
+                    "link": "https://" + "www.linkedin.com/jobs/search/?keywords=" + encoded_role + "&location=India"
                 },
                 {
                     "title": f"{role} - Tech Roles", 
                     "company": "Naukri.com", 
                     "location": "🇮🇳 India", 
-                    "link": f"https://www.naukri.com/{naukri_role}-jobs-in-india"
+                    "link": "https://" + "www.naukri.com/" + naukri_role + "-jobs-in-india"
                 },
                 {
                     "title": f"Senior {role}", 
                     "company": "Indeed India", 
                     "location": "🇮🇳 Remote India", 
-                    "link": f"https://in.indeed.com/jobs?q={encoded_role}&l=India"
+                    "link": "https://" + "in.indeed.com/jobs?q=" + encoded_role + "&l=India"
                 }
             ]
             
@@ -194,9 +188,9 @@ def fetch_live_jobs(role, location="Bengaluru, India"):
         encoded_role = role.replace(" ", "%20")
         naukri_role = role.replace(" ", "-").lower()
         return [
-            {"title": f"{role}", "company": "LinkedIn", "location": "🇮🇳 India", "link": f"https://www.linkedin.com/jobs/search/?keywords={encoded_role}&location=India&geoId=102713980"},
-            {"title": f"{role}", "company": "Naukri", "location": "🇮🇳 India", "link": f"https://www.naukri.com/{naukri_role}-jobs-in-india"},
-            {"title": f"{role}", "company": "Indeed", "location": "🇮🇳 India", "link": f"https://in.indeed.com/jobs?q={encoded_role}&l=India"}
+            {"title": f"{role}", "company": "LinkedIn", "location": "🇮🇳 India", "link": "https://" + "www.linkedin.com/jobs/search/?keywords=" + encoded_role + "&location=India"},
+            {"title": f"{role}", "company": "Naukri", "location": "🇮🇳 India", "link": "https://" + "www.naukri.com/" + naukri_role + "-jobs-in-india"},
+            {"title": f"{role}", "company": "Indeed", "location": "🇮🇳 India", "link": "https://" + "in.indeed.com/jobs?q=" + encoded_role + "&l=India"}
         ]
 
 # ======================================================
@@ -214,7 +208,7 @@ def health_check():
 async def upload_resume(files: List[UploadFile] = File(...)):
     try:
         results = []
-        collection.delete_many({}) # Clear old session data
+        collection.delete_many({})
 
         for file in files:
             validate_file(file.filename)
@@ -231,23 +225,11 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             if not extracted_skills:
                 extracted_skills = ["Python", "Problem Solving"] 
 
-            # 1. Get Top 3 Predicted Roles and their specific ATS/Gap data
             top_career_paths = analyze_resume_roles(extracted_skills, top_n=3)
 
-            # 🛑 DOUBLE SAFETY NET: Ensure the array isn't empty before accessing index 0
-            if not top_career_paths:
-                top_career_paths = [{
-                    "predicted_role": "Software Engineer",
-                    "ats_score": 50,
-                    "matched_skills": [],
-                    "missing_skills": ["Python", "SQL", "Git", "Agile"]
-                }]
-
-            # 2. Fetch Live Jobs for EACH of the top roles
             for path in top_career_paths:
                 path["recommended_jobs"] = fetch_live_jobs(path["predicted_role"])
 
-            # 3. Save to Database
             primary_role = top_career_paths[0]["predicted_role"]
             primary_ats = top_career_paths[0]["ats_score"]
 
@@ -261,7 +243,6 @@ async def upload_resume(files: List[UploadFile] = File(...)):
             }
             save_candidate(candidate_data)
 
-            # 4. Build Response Payload for the Frontend
             results.append({
                 "filename": file.filename,
                 "extracted_skills": extracted_skills,
