@@ -255,6 +255,24 @@ function JobMatchCard({ job, index }) {
   );
 }
 
+function RoleJobsSection({ roleName, jobs }) {
+  return (
+    <div className="live-jobs" style={{ marginTop: 20 }}>
+      <h3 className="live-jobs__title" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {roleName}
+      </h3>
+      <p className="live-jobs__sub">Actively hiring in India for this role</p>
+      <div className="jobs-grid jobs-grid--three">
+        {(jobs || []).length > 0 ? (
+          jobs.map((job, i) => <JobMatchCard key={`${roleName}-${i}`} job={job} index={i} />)
+        ) : (
+          <p className="section-subtitle">No live jobs found for this role right now.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FeaturesSection() {
   const features = [
     { icon: '◈', title: 'ATS Score Analysis', desc: 'Gemini 2.5 Flash grades your resume like a real ATS.' },
@@ -371,6 +389,10 @@ function App() {
   const counselorSuggestion = results?.custom_suggestion ?? '';
   const candidateName = results?.candidate_name || 'Not found';
   const candidateEmail = results?.candidate_email || 'Not found';
+  const candidatePhone = results?.candidate_phone || 'Not found';
+  const candidateCollege = results?.candidate_college || 'Not found';
+  const recommendedRoles = results?.recommended_roles ?? [];
+  const jobsByRole = results?.jobs_by_role ?? {};
 
   const generatePDFReport = () => {
     if (!results) return;
@@ -386,7 +408,13 @@ function App() {
     y += 6;
     doc.text(`Candidate Email: ${candidateEmail}`, 14, y);
     y += 6;
+    doc.text(`Candidate Phone: ${candidatePhone}`, 14, y);
+    y += 6;
+    doc.text(`College: ${candidateCollege}`, 14, y);
+    y += 6;
     doc.text(`Predicted Role: ${role || 'N/A'}`, 14, y);
+    y += 6;
+    doc.text(`Recommended Roles: ${(recommendedRoles || []).join(', ') || 'N/A'}`, 14, y, { maxWidth: 180 });
     y += 6;
     doc.text(`ATS Score: ${results.ats_score ?? 0}/100`, 14, y);
     y += 10;
@@ -418,14 +446,21 @@ function App() {
     doc.setFontSize(13);
     doc.text('Actively Hiring Companies (India)', 14, y);
     y += 4;
+    const rows = [];
+    Object.entries(jobsByRole).forEach(([roleKey, roleJobs]) => {
+      (roleJobs || []).forEach((job) => {
+        rows.push([
+          roleKey,
+          String(job.employer_name || ''),
+          String(job.job_title || ''),
+          String(job.job_apply_link || ''),
+        ]);
+      });
+    });
     autoTable(doc, {
       startY: y,
-      head: [['Company', 'Job Title', 'Apply Link']],
-      body: (results.jobs || []).map((job) => [
-        String(job.employer_name || ''),
-        String(job.job_title || ''),
-        String(job.job_apply_link || ''),
-      ]),
+      head: [['Role', 'Company', 'Job Title', 'Apply Link']],
+      body: rows.length ? rows : [['-', '-', '-', '-']],
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [20, 83, 45] },
     });
@@ -493,6 +528,19 @@ function App() {
           <p className="section-subtitle dashboard-role">
             Candidate: <strong>{candidateName}</strong> ({candidateEmail})
           </p>
+          <p className="section-subtitle dashboard-role">
+            Phone: <strong>{candidatePhone}</strong> · College: <strong>{candidateCollege}</strong>
+          </p>
+          <p className="section-subtitle dashboard-role">
+            Recommended roles:{' '}
+            {recommendedRoles.length > 0 ? (
+              recommendedRoles.map((r, i) => (
+                <strong key={r}>{i ? `, ${r.toUpperCase()}` : r.toUpperCase()}</strong>
+              ))
+            ) : (
+              <strong>{(role || 'Not available').toUpperCase()}</strong>
+            )}
+          </p>
 
           <div className="dashboard-grid">
             <div className="dashboard-card dashboard-card--score">
@@ -550,17 +598,15 @@ function App() {
             </button>
           </div>
 
-          {results.jobs && results.jobs.length > 0 && (
-            <div className="live-jobs">
-              <h3 className="live-jobs__title">Live job matches</h3>
-              <p className="live-jobs__sub">Pulled from JSearch (India) — apply in one click</p>
-              <div className="jobs-grid jobs-grid--three">
-                {results.jobs.map((job, i) => (
-                  <JobMatchCard key={i} job={job} index={i} />
-                ))}
-              </div>
-            </div>
-          )}
+          <div className="live-jobs">
+            <h3 className="live-jobs__title">Multi-role live job matches</h3>
+            <p className="live-jobs__sub">
+              Pulled from JSearch (India). Apply opens the real company portal in a new tab.
+            </p>
+            {Object.entries(jobsByRole).map(([roleName, jobs]) => (
+              <RoleJobsSection key={roleName} roleName={roleName} jobs={jobs} />
+            ))}
+          </div>
         </section>
       )}
 

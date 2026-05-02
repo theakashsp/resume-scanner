@@ -69,6 +69,7 @@ ATS_JSON_SCHEMA = {
     "properties": {
         "ats_score": {"type": "integer", "minimum": 0, "maximum": 100},
         "predicted_role": {"type": "string"},
+        "recommended_roles": {"type": "array", "items": {"type": "string"}},
         "matched_skills": {"type": "array", "items": {"type": "string"}},
         "missing_skills": {"type": "array", "items": {"type": "string"}},
         "learning_roadmap": {
@@ -89,6 +90,7 @@ ATS_JSON_SCHEMA = {
     "required": [
         "ats_score",
         "predicted_role",
+        "recommended_roles",
         "matched_skills",
         "missing_skills",
         "learning_roadmap",
@@ -130,6 +132,7 @@ The output must be concrete and personalized (not generic).
         f"{system}\n"
         "\nRules:\n"
         "1) predicted_role must be one realistic role title.\n"
+        "1b) recommended_roles must include 3-5 suitable role titles ranked from best fit to lower fit.\n"
         "2) ats_score must be integer 0-100.\n"
         "3) matched_skills and missing_skills must be practical and role-specific.\n"
         "4) learning_roadmap must be sequential and actionable, each step with title, focus, and project_idea.\n"
@@ -213,15 +216,13 @@ def analyze_resume_fallback(resume_text: str) -> dict[str, Any]:
         ],
     }
 
-    best_role = "Software Engineer"
-    best_match: list[str] = []
-    best_total = 10
+    ranking: list[tuple[str, list[str], int]] = []
     for role, keywords in role_keywords.items():
         matched = [k for k in keywords if k in text]
-        if len(matched) > len(best_match):
-            best_role = role
-            best_match = matched
-            best_total = len(keywords)
+        ranking.append((role, matched, len(keywords)))
+    ranking.sort(key=lambda item: len(item[1]), reverse=True)
+    best_role, best_match, best_total = ranking[0]
+    recommended_roles = [r[0] for r in ranking[:4]]
 
     missing = [k for k in role_keywords.get(best_role, []) if k not in best_match]
     ratio = (len(best_match) / max(1, best_total)) * 100
@@ -255,6 +256,7 @@ def analyze_resume_fallback(resume_text: str) -> dict[str, Any]:
     return {
         "ats_score": ats_score,
         "predicted_role": best_role,
+        "recommended_roles": recommended_roles,
         "matched_skills": best_match[:12],
         "missing_skills": missing[:12],
         "learning_roadmap": roadmap,
@@ -265,8 +267,11 @@ def analyze_resume_fallback(resume_text: str) -> dict[str, Any]:
 def _extract_candidate_details(resume_text: str) -> dict[str, str]:
     lines = [ln.strip() for ln in resume_text.splitlines() if ln.strip()]
     email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", resume_text)
+    phone_match = re.search(r"(?:\+91[\-\s]?)?[6-9]\d{9}", resume_text)
     email = email_match.group(0) if email_match else "Not found"
+    phone = phone_match.group(0) if phone_match else "Not found"
     probable_name = "Not found"
+    college = "Not found"
     for ln in lines[:8]:
         if "@" in ln or len(ln.split()) < 2 or len(ln.split()) > 5:
             continue
@@ -274,7 +279,17 @@ def _extract_candidate_details(resume_text: str) -> dict[str, str]:
             continue
         probable_name = ln
         break
-    return {"candidate_name": probable_name, "candidate_email": email}
+    for ln in lines:
+        l = ln.lower()
+        if "college" in l or "university" in l or "institute" in l:
+            college = ln
+            break
+    return {
+        "candidate_name": probable_name,
+        "candidate_email": email,
+        "candidate_phone": phone,
+        "candidate_college": college,
+    }
 
 
 def fetch_jsearch_jobs(predicted_role: str, limit: int = 5) -> list[dict[str, Any]]:
@@ -320,6 +335,16 @@ def fetch_jsearch_jobs(predicted_role: str, limit: int = 5) -> list[dict[str, An
     except Exception as exc:
         _log(f"[JSearch] {type(exc).__name__}: {exc!r}")
     return out[:limit]
+
+
+def fetch_jobs_for_roles(roles: list[str], per_role_limit: int = 5) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for role in roles:
+        role_name = str(role).strip()
+        if not role_name:
+            continue
+        grouped[role_name] = fetch_jsearch_jobs(role_name, per_role_limit)
+    return grouped
 
 
 @app.get("/")
@@ -370,6 +395,14 @@ async def _analyze_impl(file: UploadFile) -> dict[str, Any]:
         except Exception:
             ai = analyze_resume_fallback(text)
         role = str(ai.get("predicted_role") or "Software Engineer").strip()
+        recommended_roles = [
+            str(x).strip()
+            for x in (ai.get("recommended_roles") or [])
+            if str(x).strip()
+        ]
+        if role and role not in recommended_roles:
+            recommended_roles.insert(0, role)
+        recommended_roles = recommended_roles[:5] if recommended_roles else [role]
         try:
             ats = int(ai.get("ats_score", 0))
         except (TypeError, ValueError):
@@ -379,20 +412,25 @@ async def _analyze_impl(file: UploadFile) -> dict[str, Any]:
         matched = [str(s).strip() for s in (ai.get("matched_skills") or []) if s]
         missing = [str(s).strip() for s in (ai.get("missing_skills") or []) if s]
 
-        jobs = fetch_jsearch_jobs(role, 5)
+        jobs_by_role = fetch_jobs_for_roles(recommended_roles, 5)
+        jobs = jobs_by_role.get(role, [])
         details = _extract_candidate_details(text)
 
         return {
             "ats_score": ats,
             "predicted_role": role,
+            "recommended_roles": recommended_roles,
             "matched_skills": matched,
             "missing_skills": missing,
             "learning_roadmap": ai.get("learning_roadmap") or [],
             "custom_suggestion": str(ai.get("custom_suggestion") or "").strip(),
             "keywords": matched[:15],
             "jobs": jobs,
+            "jobs_by_role": jobs_by_role,
             "candidate_name": details.get("candidate_name", "Not found"),
             "candidate_email": details.get("candidate_email", "Not found"),
+            "candidate_phone": details.get("candidate_phone", "Not found"),
+            "candidate_college": details.get("candidate_college", "Not found"),
         }
     except HTTPException:
         raise
