@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import axios from 'axios';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import TechBackground3D from './TechBackground3D';
 import MainAmbient3D from './MainAmbient3D';
 import './App.css';
@@ -144,8 +146,8 @@ function StepProgress({ steps, currentStep }) {
   const lines = [
     '> Initializing neural parser...',
     '> Extracting semantic embeddings...',
-    '> Gemini ATS scoring...',
-    '> Fetching live jobs (Remotive)...',
+    '> Gemini career counseling...',
+    '> Fetching real-time India jobs (JSearch)...',
     '> Building your dashboard...',
   ];
   return (
@@ -223,30 +225,23 @@ function AtsScoreRing({ score }) {
 }
 
 function JobMatchCard({ job, index }) {
-  const matchColor = job.match_score >= 75 ? '#10B981' : job.match_score >= 50 ? '#F59E0B' : '#EF4444';
-  const href = job.url || job.link || '#';
+  const href = job.job_apply_link || '#';
   return (
     <div className="job-card job-card--live" style={{ animationDelay: `${index * 90}ms` }}>
       <div className="job-card__header">
         <div className="job-card__company-logo">
-          {(job.company || 'C').charAt(0).toUpperCase()}
+          {(job.employer_name || 'C').charAt(0).toUpperCase()}
         </div>
         <div className="job-card__meta">
-          <h3 className="job-card__title">{job.title}</h3>
-          <p className="job-card__company">{job.company}</p>
-        </div>
-        <div className="job-card__score" style={{ color: matchColor, borderColor: matchColor }}>
-          {job.match_score}%
+          <h3 className="job-card__title">{job.job_title}</h3>
+          <p className="job-card__company">{job.employer_name}</p>
         </div>
       </div>
       <div className="job-card__tags">
         {job.location && <span className="job-card__tag">📍 {job.location}</span>}
-        {job.type && <span className="job-card__tag">{job.type}</span>}
+        {job.job_employment_type && <span className="job-card__tag">{job.job_employment_type}</span>}
       </div>
       <div className="job-card__footer job-card__footer--apply">
-        <div className="job-card__match-bar-track">
-          <div className="job-card__match-bar-fill" style={{ width: `${job.match_score}%`, background: matchColor }} />
-        </div>
         <a
           className="btn btn--sm btn--apply"
           href={href}
@@ -372,6 +367,78 @@ function App() {
   const matched = results?.matched_skills ?? [];
   const missing = results?.missing_skills ?? [];
   const role = results?.predicted_role;
+  const roadmap = results?.learning_roadmap ?? [];
+  const counselorSuggestion = results?.custom_suggestion ?? '';
+  const candidateName = results?.candidate_name || 'Not found';
+  const candidateEmail = results?.candidate_email || 'Not found';
+
+  const generatePDFReport = () => {
+    if (!results) return;
+    const doc = new jsPDF();
+    let y = 16;
+
+    doc.setFontSize(18);
+    doc.text('ResumeAIX Career Report', 14, y);
+    y += 8;
+
+    doc.setFontSize(11);
+    doc.text(`Candidate Name: ${candidateName}`, 14, y);
+    y += 6;
+    doc.text(`Candidate Email: ${candidateEmail}`, 14, y);
+    y += 6;
+    doc.text(`Predicted Role: ${role || 'N/A'}`, 14, y);
+    y += 6;
+    doc.text(`ATS Score: ${results.ats_score ?? 0}/100`, 14, y);
+    y += 10;
+
+    doc.setFontSize(13);
+    doc.text('Missing Skills', 14, y);
+    y += 6;
+    doc.setFontSize(11);
+    doc.text((missing.length ? missing.join(', ') : 'No missing skills detected.'), 14, y, { maxWidth: 180 });
+    y += 12;
+
+    doc.setFontSize(13);
+    doc.text('Learning Roadmap', 14, y);
+    y += 4;
+    autoTable(doc, {
+      startY: y,
+      head: [['Step', 'Title', 'Focus', 'Project Idea']],
+      body: (roadmap.length ? roadmap : [{ step: 1, title: 'Roadmap unavailable', focus: '-', project_idea: '-' }]).map((step) => [
+        String(step.step ?? ''),
+        String(step.title ?? ''),
+        String(step.focus ?? ''),
+        String(step.project_idea ?? ''),
+      ]),
+      styles: { fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [17, 24, 39] },
+    });
+
+    y = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : y + 20;
+    doc.setFontSize(13);
+    doc.text('Actively Hiring Companies (India)', 14, y);
+    y += 4;
+    autoTable(doc, {
+      startY: y,
+      head: [['Company', 'Job Title', 'Apply Link']],
+      body: (results.jobs || []).map((job) => [
+        String(job.employer_name || ''),
+        String(job.job_title || ''),
+        String(job.job_apply_link || ''),
+      ]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [20, 83, 45] },
+    });
+
+    y = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : y + 20;
+    doc.setFontSize(13);
+    doc.text('AI Counselor Suggestion', 14, y);
+    y += 6;
+    doc.setFontSize(10);
+    doc.text(counselorSuggestion || 'No suggestion available.', 14, y, { maxWidth: 180 });
+
+    doc.save('ResumeAIX-Career-Report.pdf');
+  };
 
   return (
     <div className="app">
@@ -423,6 +490,9 @@ function App() {
               Predicted role: <strong>{role}</strong>
             </p>
           )}
+          <p className="section-subtitle dashboard-role">
+            Candidate: <strong>{candidateName}</strong> ({candidateEmail})
+          </p>
 
           <div className="dashboard-grid">
             <div className="dashboard-card dashboard-card--score">
@@ -453,13 +523,37 @@ function App() {
                   <span className="skill-list__empty">No gaps listed — great coverage.</span>
                 )}
               </div>
+              {roadmap.length > 0 && (
+                <>
+                  <h3 className="dashboard-card__title dashboard-card__title--spaced">Learning roadmap</h3>
+                  <ul className="skill-list skill-list--matched">
+                    {roadmap.map((step, idx) => (
+                      <li key={idx}>
+                        <strong>Step {step.step}:</strong> {step.title} - {step.focus} (Project: {step.project_idea})
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {counselorSuggestion && (
+                <>
+                  <h3 className="dashboard-card__title dashboard-card__title--spaced">AI counselor suggestion</h3>
+                  <p className="section-subtitle">{counselorSuggestion}</p>
+                </>
+              )}
             </div>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <button type="button" className="btn btn--primary btn--lg" onClick={generatePDFReport}>
+              Download Career Report
+            </button>
           </div>
 
           {results.jobs && results.jobs.length > 0 && (
             <div className="live-jobs">
               <h3 className="live-jobs__title">Live job matches</h3>
-              <p className="live-jobs__sub">Pulled from Remotive — apply in one click</p>
+              <p className="live-jobs__sub">Pulled from JSearch (India) — apply in one click</p>
               <div className="jobs-grid jobs-grid--three">
                 {results.jobs.map((job, i) => (
                   <JobMatchCard key={i} job={job} index={i} />

@@ -1,108 +1,148 @@
-🚀 ResumeAIX: AI-Powered ATS Scanner & Job Matcher
-ResumeAIX is a full-stack, AI-driven web application designed to help job seekers bypass modern Applicant Tracking Systems (ATS). By leveraging Google's Gemini 2.5 Flash LLM and real-time job APIs, the platform instantly analyzes uploaded resumes, calculates an ATS match score, identifies critical skill gaps, and provides live, clickable job matches tailored to the candidate's profile.
+# 🚀 ResumeAIX: AI-Powered ATS Scanner & Job Matcher
 
-✨ New in v2.0 (Production Update)
-User Authentication: Secure JWT-based login and registration system backed by MongoDB.
+Welcome to **ResumeAIX**, a full-stack AI web application built to help job seekers bridge the gap between academia and industry. By leveraging **Google Gemini LLM** and real-time job APIs, ResumeAIX instantly calculates an ATS match score, identifies critical skill gaps, and provides live, clickable job matches.
 
-Protected Dashboards: Private resume analysis workflow locked behind user authentication.
+---
 
-Multi-Page Routing: Seamless navigation with React Router (Home, About, Contact, Dashboard).
+## 🎯 Core Features
 
-3D Glassmorphic UI: Premium dark-mode interface featuring a live, interactive 3D background powered by React Three Fiber.
+| 🌟 Feature                 | 📝 Description                                               |
+| -------------------------- | ------------------------------------------------------------ |
+| 🔐 **User Authentication** | Secure JWT-based login and registration backed by MongoDB    |
+| 📄 **Smart PDF Parsing**   | Extracts unstructured text from resumes using `pdfminer.six` |
+| 🤖 **AI ATS Scoring**      | Uses Google Gemini 2.5 Flash as a virtual recruiter          |
+| 🌍 **Live Job Matches**    | Fetches real-time remote tech jobs via APIs                  |
+| 🎨 **3D Glassmorphic UI**  | Dark-mode UI with React Three Fiber animations               |
 
-🏗️ System Architecture & Data Flow
-Below is the end-to-end data pipeline representing the core workflow:
+---
 
-Plaintext
-  [ User ]
-     │
-     ▼  (1. Register / Login)
-  [ MongoDB (Users) ]
-     │
-     ▼  (2. JWT Token Granted -> Redirect to /dashboard)
-  ┌───────────────────────────┐
-  │     React Frontend        │  <-- Renders 3D Background & Dropzone
-  └─────────────┬─────────────┘
-                │  (3. POST /analyze + JWT Token)
-                ▼
-  ┌───────────────────────────┐
-  │     FastAPI Backend       │  <-- Extracts text via pdfminer.six
-  └─────────┬───────┬─────────┘
-            │       │
-            ▼       ▼  (4. Send Text + System Prompt)
-  ┌───────────────────────────┐
-  │  Google Gemini 2.5 Flash  │  <-- Predicts Role, ATS Score, & Missing Skills
-  └─────────────┬─────────────┘
-                │  (5. Return JSON payload)
-                ▼
-  ┌───────────────────────────┐
-  │     Python Controller     │
-  └─────────┬───────┬─────────┘
-            │       │
-            ▼       ▼  (6. Query Live Job Database based on AI Prediction)
-  ┌───────────────────────────┐
-  │       Remotive API        │  <-- Fetches 3 live remote jobs
-  └─────────────┬─────────────┘
-                │
-                ▼  (7. Send final aggregate data back to client)
-  ┌───────────────────────────┐
-  │     React Frontend        │  <-- Renders Circular ATS Loader & Job Cards
-  └───────────────────────────┘
-💻 Tech Stack
-Frontend: React.js, React Router, Custom CSS3, Axios, @react-three/fiber (3D Animations)
+## 🏗️ System Architecture
 
-Backend: Python, FastAPI, Uvicorn
+```text
+[ User / Job Seeker ]
+        │
+        ▼ (Uploads PDF & Clicks Analyze)
 
-Authentication: JWT (JSON Web Tokens), passlib, bcrypt
+┌───────────────────────────────┐
+│       React Frontend          │
+│  (3D UI, Dashboards, Routes)  │
+└─────────────▲─────────────────┘
+              │ (Response: ATS Score, Skills, Jobs)
+              ▼
+┌───────────────────────────────┐
+│       FastAPI Backend         │
+│   (Auth + Business Logic)     │
+└─────────────┬─────────────────┘
+              │
+     ┌────────┴────────┐
+     ▼                 ▼
+Google Gemini API   Remotive API
+ (AI Analysis)      (Job Fetching)
+```
 
-Database: MongoDB, PyMongo
+---
 
-AI & NLP: google-generativeai (Gemini 2.5 Flash), pdfminer.six
+## 💻 Tech Stack
 
-External Integrations: Remotive API
+| 🔧 Layer            | 🛠️ Technologies                                         |
+| ------------------- | -------------------------------------------------------- |
+| **Frontend**        | React.js, React Router, Tailwind CSS, @react-three/fiber |
+| **Backend**         | Python, FastAPI, Uvicorn, Requests                       |
+| **Database & Auth** | MongoDB, PyMongo, JWT, Passlib, Bcrypt                   |
+| **AI & NLP**        | Google Gemini 2.5 Flash, pdfminer.six                    |
 
-⚙️ Local Setup & Installation
-Prerequisites
-Python 3.9+
+---
 
-Node.js & npm
+## ⚙️ Local Setup & Installation
 
-MongoDB (Local or Atlas Cluster)
+### 🔹 1. Backend Setup
 
-A valid Google AI Studio API Key
-
-1. Backend Setup
-Open a terminal and navigate to the backend directory:
-
-Bash
+```bash
 cd backend
 python -m venv venv
-source venv/Scripts/activate  # On Windows. Use `source venv/bin/activate` on Mac/Linux
+```
+
+Activate virtual environment:
+
+```bash
+# Windows
+venv\Scripts\activate
+
+# Mac/Linux
+source venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
 pip install fastapi uvicorn python-multipart requests pdfminer.six pymongo google-generativeai passlib bcrypt pyjwt
-Create a .env file in your backend folder and add your keys:
+```
 
-Code snippet
-GEMINI_API_KEY=your_google_api_key_here
-SECRET_KEY=your_random_jwt_secret_here
-MONGO_URI=mongodb://localhost:27017
-Start the FastAPI server:
+Run the backend server:
 
-Bash
+```bash
 python -m uvicorn main:app --reload
-2. Frontend Setup
-Open a second, separate terminal and navigate to the frontend directory:
+```
 
-Bash
+---
+
+### 🔹 2. Frontend Setup
+
+```bash
 cd frontend
 npm install
-npm install react-router-dom axios react-dropzone @react-three/fiber @react-three/drei
-Start the React development server:
-
-Bash
 npm start
-The application will now be running on http://localhost:3000 with the backend listening on [http://127.0.0.1:8000](http://127.0.0.1:8000).
+```
 
-🔮 Future Scope
-RAG Architecture: Implementing Retrieval-Augmented Generation with Vector Embeddings for mathematically precise job matching.
+---
 
-Automated Upskilling: Directly linking identified "Missing Skills" to highly-rated, free Coursera and YouTube learning paths.
+## 🔄 Workflow Summary
+
+1. User uploads resume (PDF)
+2. Backend extracts text using `pdfminer`
+3. Gemini AI analyzes resume
+4. ATS score + skill gaps generated
+5. Matching jobs fetched from API
+6. Results displayed in UI dashboard
+
+---
+
+## 🚀 Deployment Tips
+
+* Use **Render / Railway / AWS** for backend hosting
+* Deploy frontend via **Vercel / Netlify**
+* Store secrets using `.env` files
+* Enable HTTPS for secure JWT handling
+
+---
+
+## 📌 Future Enhancements
+
+* 📊 Resume improvement score breakdown
+* 🧠 Personalized learning roadmap
+* 📈 Skill trend analytics
+* 📝 Cover letter generator
+* 🎯 Role-specific resume optimization
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to fork the repo and submit a pull request.
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License**.
+
+---
+
+## ⭐ Support
+
+If you found this project useful, consider giving it a ⭐ on GitHub!
+
+---
+git add README.md
+git commit -m "Finalized README with structured tables and formatting"
+git push origin main

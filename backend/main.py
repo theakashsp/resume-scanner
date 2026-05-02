@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import uuid
 from typing import Any
-from urllib.parse import quote
 
 # Windows consoles often default to cp1252; printing Unicode (or logging) can raise UnicodeEncodeError.
 if hasattr(sys.stdout, "reconfigure"):
@@ -39,6 +39,8 @@ from pdfminer.high_level import extract_text as pdfminer_extract_text
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "").strip()
+RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com").strip()
 _genai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 ALLOWED_ORIGINS = [
@@ -69,12 +71,28 @@ ATS_JSON_SCHEMA = {
         "predicted_role": {"type": "string"},
         "matched_skills": {"type": "array", "items": {"type": "string"}},
         "missing_skills": {"type": "array", "items": {"type": "string"}},
+        "learning_roadmap": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "step": {"type": "integer"},
+                    "title": {"type": "string"},
+                    "focus": {"type": "string"},
+                    "project_idea": {"type": "string"},
+                },
+                "required": ["step", "title", "focus", "project_idea"],
+            },
+        },
+        "custom_suggestion": {"type": "string"},
     },
     "required": [
         "ats_score",
         "predicted_role",
         "matched_skills",
         "missing_skills",
+        "learning_roadmap",
+        "custom_suggestion",
     ],
 }
 
@@ -102,14 +120,22 @@ def analyze_resume_with_gemini(resume_text: str) -> dict[str, Any]:
     if _genai_client is None:
         raise RuntimeError("GEMINI_API_KEY missing")
     truncated = _normalize_resume_text(resume_text)[:28000]
-    system = (
-        "You are an expert ATS recruiter. Analyze the resume strictly from the text. "
-        "Score how well it would pass typical ATS filters for the predicted role."
-    )
+    system = """
+You are an expert Career Counselor for Indian job seekers.
+Analyze the resume text deeply and return ONLY valid JSON.
+No markdown, no explanations outside JSON.
+The output must be concrete and personalized (not generic).
+"""
     user = (
-        f"{system}\n\n--- RESUME ---\n{truncated}\n--- END ---\n"
-        "Output JSON only: ats_score 0-100, predicted_role (one concise title), "
-        "matched_skills (strengths), missing_skills (gaps vs that role)."
+        f"{system}\n"
+        "\nRules:\n"
+        "1) predicted_role must be one realistic role title.\n"
+        "2) ats_score must be integer 0-100.\n"
+        "3) matched_skills and missing_skills must be practical and role-specific.\n"
+        "4) learning_roadmap must be sequential and actionable, each step with title, focus, and project_idea.\n"
+        "5) custom_suggestion must be one personalized paragraph, encouraging and specific.\n"
+        "6) Avoid boilerplate.\n"
+        f"\n--- RESUME ---\n{truncated}\n--- END ---\n"
     )
     try:
         response = _genai_client.models.generate_content(
@@ -200,58 +226,99 @@ def analyze_resume_fallback(resume_text: str) -> dict[str, Any]:
     missing = [k for k in role_keywords.get(best_role, []) if k not in best_match]
     ratio = (len(best_match) / max(1, best_total)) * 100
     ats_score = int(max(35, min(95, round(40 + ratio * 0.55))))
+    roadmap = [
+        {
+            "step": 1,
+            "title": "Strengthen missing fundamentals",
+            "focus": f"Study and practice: {', '.join(missing[:3]) or 'core role concepts'}.",
+            "project_idea": f"Build a mini {best_role.lower()} project using at least two missing skills.",
+        },
+        {
+            "step": 2,
+            "title": "Build portfolio depth",
+            "focus": "Create production-style project structure, tests, and documentation.",
+            "project_idea": "Publish one end-to-end project with README, screenshots, and architecture notes.",
+        },
+        {
+            "step": 3,
+            "title": "Interview and ATS optimization",
+            "focus": "Rewrite resume bullets with metrics and role keywords.",
+            "project_idea": "Prepare a 2-minute project walkthrough and common interview Q&A set.",
+        },
+    ]
+    suggestion = (
+        f"You already show a base for {best_role} with strengths in {', '.join(best_match[:4]) or 'relevant tools'}. "
+        f"To improve hiring chances, focus next on {', '.join(missing[:3]) or 'deeper role-specific skills'}, "
+        "and convert that learning into one strong portfolio project with measurable outcomes. "
+        "You are close to interview-ready if you consistently practice and align your resume keywords with target job descriptions."
+    )
     return {
         "ats_score": ats_score,
         "predicted_role": best_role,
         "matched_skills": best_match[:12],
         "missing_skills": missing[:12],
+        "learning_roadmap": roadmap,
+        "custom_suggestion": suggestion,
     }
 
 
-def fetch_remotive_jobs(predicted_role: str, limit: int = 3) -> list[dict[str, Any]]:
-    words = predicted_role.replace("/", " ").split()[:4]
-    search = " ".join(words).strip() or "software developer"
-    url = "https://remotive.com/api/remote-jobs"
+def _extract_candidate_details(resume_text: str) -> dict[str, str]:
+    lines = [ln.strip() for ln in resume_text.splitlines() if ln.strip()]
+    email_match = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", resume_text)
+    email = email_match.group(0) if email_match else "Not found"
+    probable_name = "Not found"
+    for ln in lines[:8]:
+        if "@" in ln or len(ln.split()) < 2 or len(ln.split()) > 5:
+            continue
+        if re.search(r"\d", ln):
+            continue
+        probable_name = ln
+        break
+    return {"candidate_name": probable_name, "candidate_email": email}
+
+
+def fetch_jsearch_jobs(predicted_role: str, limit: int = 5) -> list[dict[str, Any]]:
+    query = f"{predicted_role} in India"
     out: list[dict[str, Any]] = []
+    if not RAPIDAPI_KEY:
+        return out
+
     try:
         r = requests.get(
-            url,
-            params={"search": search},
+            "https://jsearch.p.rapidapi.com/search",
+            headers={
+                "X-RapidAPI-Key": RAPIDAPI_KEY,
+                "X-RapidAPI-Host": RAPIDAPI_HOST,
+            },
+            params={
+                "query": query,
+                "page": "1",
+                "num_pages": "1",
+                "country": "in",
+            },
             timeout=20,
         )
         r.raise_for_status()
         payload = r.json()
-        jobs = payload.get("jobs") or []
+        jobs = payload.get("data") or []
         for j in jobs:
             if len(out) >= limit:
                 break
-            u = j.get("url") or "#"
+            apply_link = j.get("job_apply_link") or j.get("job_google_link") or "#"
             out.append(
                 {
-                    "title": j.get("title") or "Open role",
-                    "company": j.get("company_name") or "Company",
-                    "location": j.get("candidate_required_location") or "Remote",
-                    "type": "Remote",
-                    "url": u,
-                    "match_score": max(72, 94 - len(out) * 8),
+                    "employer_name": j.get("employer_name") or "Hiring Company",
+                    "job_title": j.get("job_title") or predicted_role,
+                    "job_apply_link": apply_link,
+                    "location": ", ".join(
+                        [x for x in [j.get("job_city"), j.get("job_country")] if x]
+                    )
+                    or "India",
+                    "job_employment_type": j.get("job_employment_type") or "Full-time",
                 }
             )
     except Exception as exc:
-        _log(f"[Remotive] {type(exc).__name__}: {exc!r}")
-
-    i = len(out)
-    while len(out) < limit:
-        out.append(
-            {
-                "title": f"{predicted_role} - search live roles",
-                "company": "Remotive",
-                "location": "Remote",
-                "type": "Remote",
-                "url": f"https://remotive.com/remote-jobs/search?search={quote(search)}",
-                "match_score": max(55, 78 - i * 6),
-            }
-        )
-        i += 1
+        _log(f"[JSearch] {type(exc).__name__}: {exc!r}")
     return out[:limit]
 
 
@@ -273,8 +340,12 @@ def analyze_get_info():
     }
 
 
-@app.post("/analyze")
-async def analyze(file: UploadFile = File(..., description="PDF resume")):
+@app.get("/api/analyze")
+def analyze_get_info_compat():
+    return analyze_get_info()
+
+
+async def _analyze_impl(file: UploadFile) -> dict[str, Any]:
     fname = (file.filename or "").lower()
     if not fname.endswith(".pdf"):
         raise HTTPException(
@@ -308,15 +379,20 @@ async def analyze(file: UploadFile = File(..., description="PDF resume")):
         matched = [str(s).strip() for s in (ai.get("matched_skills") or []) if s]
         missing = [str(s).strip() for s in (ai.get("missing_skills") or []) if s]
 
-        jobs = fetch_remotive_jobs(role, 3)
+        jobs = fetch_jsearch_jobs(role, 5)
+        details = _extract_candidate_details(text)
 
         return {
             "ats_score": ats,
             "predicted_role": role,
             "matched_skills": matched,
             "missing_skills": missing,
+            "learning_roadmap": ai.get("learning_roadmap") or [],
+            "custom_suggestion": str(ai.get("custom_suggestion") or "").strip(),
             "keywords": matched[:15],
             "jobs": jobs,
+            "candidate_name": details.get("candidate_name", "Not found"),
+            "candidate_email": details.get("candidate_email", "Not found"),
         }
     except HTTPException:
         raise
@@ -339,6 +415,16 @@ async def analyze(file: UploadFile = File(..., description="PDF resume")):
                 os.remove(path)
             except OSError:
                 pass
+
+
+@app.post("/analyze")
+async def analyze(file: UploadFile = File(..., description="PDF resume")):
+    return await _analyze_impl(file)
+
+
+@app.post("/api/analyze")
+async def analyze_compat(file: UploadFile = File(..., description="PDF resume")):
+    return await _analyze_impl(file)
 
 
 if __name__ == "__main__":
