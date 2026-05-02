@@ -39,18 +39,15 @@ from pdfminer.high_level import extract_text as pdfminer_extract_text
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError(
-        "Missing GEMINI_API_KEY. Create backend/.env with GEMINI_API_KEY=your_key"
-    )
-
-_genai_client = genai.Client(api_key=GEMINI_API_KEY)
+_genai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://localhost:3002",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
 ]
 
 app = FastAPI(title="ResumeAIX API", version="2.0")
@@ -102,6 +99,8 @@ def extract_pdf_text(path: str) -> str:
 
 
 def analyze_resume_with_gemini(resume_text: str) -> dict[str, Any]:
+    if _genai_client is None:
+        raise RuntimeError("GEMINI_API_KEY missing")
     truncated = _normalize_resume_text(resume_text)[:28000]
     system = (
         "You are an expert ATS recruiter. Analyze the resume strictly from the text. "
@@ -132,6 +131,81 @@ def analyze_resume_with_gemini(resume_text: str) -> dict[str, Any]:
             status_code=502,
             detail=f"Gemini analysis failed: {safe_detail[:500]}",
         )
+
+
+def analyze_resume_fallback(resume_text: str) -> dict[str, Any]:
+    """Local heuristic ATS analysis used when Gemini key is unavailable."""
+    text = _normalize_resume_text(resume_text).lower()
+    role_keywords: dict[str, list[str]] = {
+        "Data Scientist": [
+            "python",
+            "pandas",
+            "numpy",
+            "scikit",
+            "machine learning",
+            "tensorflow",
+            "pytorch",
+            "sql",
+            "statistics",
+            "power bi",
+        ],
+        "Backend Developer": [
+            "python",
+            "fastapi",
+            "django",
+            "flask",
+            "api",
+            "sql",
+            "postgresql",
+            "redis",
+            "docker",
+            "aws",
+        ],
+        "Frontend Developer": [
+            "javascript",
+            "typescript",
+            "react",
+            "next.js",
+            "html",
+            "css",
+            "redux",
+            "tailwind",
+            "webpack",
+            "api",
+        ],
+        "DevOps Engineer": [
+            "docker",
+            "kubernetes",
+            "jenkins",
+            "github actions",
+            "terraform",
+            "aws",
+            "azure",
+            "gcp",
+            "linux",
+            "monitoring",
+        ],
+    }
+
+    best_role = "Software Engineer"
+    best_match: list[str] = []
+    best_total = 10
+    for role, keywords in role_keywords.items():
+        matched = [k for k in keywords if k in text]
+        if len(matched) > len(best_match):
+            best_role = role
+            best_match = matched
+            best_total = len(keywords)
+
+    missing = [k for k in role_keywords.get(best_role, []) if k not in best_match]
+    ratio = (len(best_match) / max(1, best_total)) * 100
+    ats_score = int(max(35, min(95, round(40 + ratio * 0.55))))
+    return {
+        "ats_score": ats_score,
+        "predicted_role": best_role,
+        "matched_skills": best_match[:12],
+        "missing_skills": missing[:12],
+    }
 
 
 def fetch_remotive_jobs(predicted_role: str, limit: int = 3) -> list[dict[str, Any]]:
@@ -220,7 +294,10 @@ async def analyze(file: UploadFile = File(..., description="PDF resume")):
                 detail="No extractable text in PDF (try a text-based PDF).",
             )
 
-        ai = analyze_resume_with_gemini(text)
+        try:
+            ai = analyze_resume_with_gemini(text)
+        except Exception:
+            ai = analyze_resume_fallback(text)
         role = str(ai.get("predicted_role") or "Software Engineer").strip()
         try:
             ats = int(ai.get("ats_score", 0))
